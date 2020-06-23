@@ -1,0 +1,127 @@
+#!@PYTHON@
+
+import sys
+import logging
+from logging.handlers import SysLogHandler
+import getopt
+import os
+
+import paf.sd
+import paf.server
+import paf.eventloop
+
+DEFAULT_CLIENTS_MAX = 1000
+
+def usage(name):
+    print("Usage:")
+    print("%s [-s] [-l <level>] [-y <facility>] [-c <max-clients>]" % name)
+    print("%s [-m <addr0>+...+<addrN>] [<domain-addr> ...]" % \
+          (len(name) * " "))
+    print("%s -h" % name)
+    print("Arguments:")
+    print("  <domain-addr>  The XCM server address of a domain to be "
+          "instantiated by the")
+    print("                 server.")
+    print("Options:")
+    print("  -m <addr0>+...+<addrN>  Instantiate a multi-socket domain. The "
+          "'+' separator")
+    print("                          may not be used in the addresses.")
+    print("  -s                      Enable logging to console.")
+    print("  -l <level>              Filter levels below <level>.")
+    print("  -y <facility>           Set syslog facility to use.")
+    print("  -c <max-clients>        Set the maximum number of allowed "
+          "connected clients")
+    print("                          to <max-clients>. The default is %d." % \
+          DEFAULT_CLIENTS_MAX)
+    print("  -h                      Print this text.")
+
+logger = logging.getLogger()
+
+level_names = {
+    'debug' : logging.DEBUG,
+    'info' : logging.INFO,
+    'warning' : logging.WARNING,
+    'error' : logging.ERROR,
+    'critical' : logging.CRITICAL
+}
+
+def setup_logging(syslog_only, level, syslog_facility):
+    logging.basicConfig(level=level)
+    syslog = SysLogHandler(address = '/dev/log',
+                           facility = syslog_facility)
+    syslog.ident = 'pafd[%d]: ' % os.getpid()
+    if syslog_only:
+        logger.handlers = []
+    logger.addHandler(syslog)
+
+try:
+    optlist, args = getopt.getopt(sys.argv[1:], 'm:sl:y:c:h')
+except getopt.GetoptError as e:
+    print("Error parsning command line: %s." % e)
+    sys.exit(1)
+
+domains = [[domain] for domain in args]
+
+syslog_only = True
+syslog_facility = SysLogHandler.LOG_DAEMON
+level = logging.WARNING
+max_clients = DEFAULT_CLIENTS_MAX
+
+for opt, optval in optlist:
+    if opt == '-m':
+        domain = []
+        for addr in optval.split('+'):
+            domain.append(addr)
+        domains.append(domain)
+    elif opt == '-s':
+        syslog_only = False
+    elif opt == '-l':
+        level = level_names.get(optval)
+        if level == None:
+            print("Valid levels are: \n%s" % \
+                  "\n".join(level_names.keys()))
+            sys.exit(1)
+    elif opt == '-y':
+        syslog_facility = optval
+        if syslog_facility not in SysLogHandler.facility_names:
+            print("Valid syslog facilities are:\n%s" % \
+                  "\n".join(SysLogHandler.facility_names.keys()))
+            sys.exit(1)
+    elif opt == '-c':
+        try:
+            max_clients = int(optval)
+        except ValueError:
+            print("Argument must be integer.")
+            sys.exit(1)
+    elif opt == '-h':
+        usage(sys.argv[0])
+        sys.exit(0)
+
+if len(domains) == 0:
+    print("No domains configured.")
+    sys.exit(1)
+
+setup_logging(syslog_only, level, syslog_facility)
+
+event_loop = paf.eventloop.EventLoop()
+try:
+    servers = []
+    for addrs in domains:
+        server = paf.server.create(addrs, max_clients, event_loop)
+        servers.append(server)
+        logger.info("Pathfinder daemon instantiated domain with "
+                    "address(es): \"%s\"." % "\" \"".join(addrs))
+
+    logger.debug("Log level %s and max clients %d." % \
+                 (logging.getLevelName(level), max_clients))
+
+    event_loop.run()
+
+    logger.info("Exiting.")
+    sys.exit(0)
+except Exception as e:
+    logger.exception("Terminating due to exception.")
+    sys.exit(1)
+finally:
+    for server in servers:
+        server.terminate()

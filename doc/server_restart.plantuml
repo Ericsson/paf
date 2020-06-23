@@ -1,0 +1,56 @@
+@startuml
+
+participant "App A" as app_a << App >>
+participant "Lib A" as lib_a << PAF Library >>
+participant "Socket A" as sock_a << XCM Connection Socket >>
+
+participant "Server A" as server_a << PAF Server >>
+participant "Server B" as server_b << PAF Server >>
+
+participant "Socket B" as sock_b << XCM Connection Socket >>
+participant "Lib B" as lib_b << PAF Library >>
+participant "App B" as app_b << App >>
+
+app_a -> lib_a: Create Domain
+app_a -> lib_a: Publish 0x4711 {'name': 'foo'}
+lib_a -> sock_a: Connect
+sock_a -> server_a: Establish TLS/TCP
+lib_a -> server_a: Protocol Hello
+lib_a -> server_a: Protocol Publish 0x4711 {'name': 'foo'}
+
+app_b -> lib_b: Create Domain
+lib_b -> sock_b: Connect
+sock_b -> server_a: Establish TLS/TCP
+lib_b -> server_a: Protocol Hello
+app_b -> lib_b: Subscribe (name=foo)
+lib_b -> server_a: Protocol Subscribe (name=foo)
+server_a -> lib_b: Protocol Match: Appeared: 0x4711 {'name': 'foo'}
+lib_b -> app_b: Match Callback: Appeared: 0x4711 {'name': 'foo'}
+...
+server_a -> sock_a: Connection Lost
+lib_a -> lib_a: Install Retry Timer (250 ms)
+server_a -> sock_b: Connection Lost
+lib_b -> lib_b: Install Retry Timer (250 ms)
+lib_b -> lib_b: Install Orphan Timeout Timer (TTL)
+server_a -> server_a: Crash/Restart
+...
+server_b -> server_b: Startup
+note right: Same address as the 'a' instance
+...
+lib_b -> sock_b: Connect
+sock_b -> server_b: Establish TLS/TCP
+lib_b -> server_b: Protocol Hello
+lib_b -> server_b: Protocol Subscribe (name=foo)
+...
+lib_a -> sock_a: Connect
+sock_a -> server_b: Establish TLS/TCP
+lib_a -> server_b: Protocol Hello
+lib_a -> server_b: Protocol Publish 0x4711 {'name': 'foo'}
+
+server_b -> lib_b: Protocol Match: Appeared: 0x4711 {'name': 'foo'}
+note right: The application is not notified, since\nthis service is known and unchanged.
+lib_b -> lib_b: Uninstall Orphan Timer
+
+@enduml
+
+

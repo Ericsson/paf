@@ -1,0 +1,145 @@
+#!@PYTHON@
+
+import sys
+import select
+import time
+
+import paf.client as client
+
+def usage(name):
+    print("%s <num-services> <num-subscriptions> <addr>" % name)
+
+def wait_for(conn, criteria):
+    while not criteria():
+        client_fds, client_events = conn.want()
+        if len(client_fds) > 0:
+            poll = select.poll()
+            client.populate(poll, client_fds, client_events)
+            poll.poll()
+        conn.process()
+
+class EventCounter:
+    def __init__(self, event_type, target):
+        self.target = target
+        self.event_type = event_type
+        self.events = []
+    def __call__(self, ta_id, event_type, *args, **optargs):
+        if self.event_type == event_type:
+            self.events.append(args)
+    def done(self):
+        return len(self.events) == self.target
+
+def subscribe(conn, start_num, count):
+    subscription_counter = EventCounter(client.EventType.ACCEPT,
+                                        count)
+    for num in range(start_num, start_num+count):
+        sub_id = num
+        conn.subscribe(sub_id, subscription_counter,
+                       filter = "(name=service-%d)" % num)
+
+    wait_for(conn, subscription_counter.done)
+
+def unsubscribe(conn, start_num, count):
+    unsubscription_counter = EventCounter(client.EventType.COMPLETE,
+                                          count)
+    for num in range(start_num, start_num+count):
+        sub_id = num
+        conn.unsubscribe(sub_id, unsubscription_counter)
+
+    wait_for(conn, unsubscription_counter.done)
+
+def publish(conn, start_num, count):
+    publish_counter = EventCounter(client.EventType.COMPLETE,
+                                   count)
+    ttl = 1
+    generation = 0
+    for num in range(start_num, start_num+count):
+        service_id = num
+        conn.publish(service_id, generation, {
+            "name": { "service-%d" % num },
+            "addr" : { "tls:10.10.10.10:4711" },
+            "color": { "green" }
+            }, ttl, publish_counter)
+
+    wait_for(conn, publish_counter.done)
+
+def unpublish(conn, start_num, count):
+    unpublish_counter = EventCounter(client.EventType.COMPLETE,
+                                     count)
+    for num in range(start_num, start_num+count):
+        service_id = num
+        conn.unpublish(service_id, unpublish_counter)
+
+    wait_for(conn, unpublish_counter.done)
+
+def ping(conn, count):
+    ping_counter = EventCounter(client.EventType.COMPLETE,
+                                     count)
+    for i in range(0, count):
+        conn.ping(ping_counter)
+
+    wait_for(conn, ping_counter.done)
+
+def pre_populate(conn, num_services, num_subscriptions):
+    subscribe(conn, 0, num_subscriptions)
+    publish(conn, 0, num_services)
+
+def cleanup(conn, num_services):
+    unpublish(conn, 0, num_services)
+
+TEST_ITER=16
+
+def benchmark_publish_unpublish(conn, num_services, num_subscriptions):
+    print("Pathfinder pre-populated state")
+    print("------------------------------")
+    print("Services: %d" % num_services)
+    print("Subscriptions: %d" % num_subscriptions)
+
+    pre_populate(conn, num_services, num_subscriptions)
+
+    print("\nResults")
+    print("-------")
+
+    start = time.time()
+    subscribe(conn, num_subscriptions, TEST_ITER)
+    latency = time.time() - start
+
+    print("Subscribe: %.3f ms/op" % (1000*(latency/TEST_ITER)))
+
+    start = time.time()
+    unsubscribe(conn, num_subscriptions, TEST_ITER)
+    latency = time.time() - start
+
+    print("Unsubscribe: %.3f ms/op" % (1000*(latency/TEST_ITER)))
+
+    start = time.time()
+    publish(conn, num_services, TEST_ITER)
+    latency = time.time() - start
+
+    print("Publish: %.3f ms/op" % (1000*(latency/TEST_ITER)))
+
+    start = time.time()
+    unpublish(conn, num_services, TEST_ITER)
+    latency = time.time() - start
+
+    print("Unpublish: %.3f ms/op" % (1000*(latency/TEST_ITER)))
+
+    start = time.time()
+    ping(conn, TEST_ITER)
+    latency = time.time() - start
+
+    print("Ping: %.3f ms/op" % (1000*(latency/TEST_ITER)))
+
+    cleanup(conn, num_services)
+
+if len(sys.argv) != 4:
+    usage(sys.argv[0])
+    sys.exit(1)
+
+num_services = int(sys.argv[1])
+num_subscriptions = int(sys.argv[2])
+addr = sys.argv[3]
+
+conn = client.connect(addr)
+benchmark_publish_unpublish(conn, num_services, num_subscriptions)
+conn.close()
