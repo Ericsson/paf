@@ -68,13 +68,13 @@ class XcmSource (Source):
         Source.__init__(self)
         self.xcm_sock = xcm_sock
     def update(self, condition):
-        xcm_fds, xcm_events = self.xcm_sock.want(condition)
         self.clear_active()
+
+        xcm_fds, xcm_events = self.xcm_sock.want(condition)
         if len(xcm_fds) == 0:
+            self.clear_fds()
             if condition != 0:
                 self.set_active()
-            else:
-                self.clear_fds()
         else:
             fds = {}
             for xcm_fd, xcm_event in zip(xcm_fds, xcm_events):
@@ -90,7 +90,7 @@ class EventLoop:
         self.source_timeout = {}
         self.source_active = set()
         self.fd_source = {}
-        self.stop = False
+        self._stop = False
         self.epoll = select.epoll()
         self.init_signal_wakeup_fd()
     def init_signal_wakeup_fd(self):
@@ -122,13 +122,17 @@ class EventLoop:
             self.source_fds[source] = fds
             for fd, mask in fds.items():
                 self.epoll.register(fd, mask)
+                assert not fd in self.fd_source
                 self.fd_source[fd] = source
     def _unregister_fds(self, source):
         fds = self.source_fds.get(source)
         if fds != None:
             del self.source_fds[source]
             for fd, mask in fds.items():
-                self.epoll.unregister(fd)
+                try:
+                    self.epoll.unregister(fd)
+                except FileNotFoundError:
+                    pass # fd is closed, and thus removed from epoll
                 del self.fd_source[fd]
     def changed_timeout(self, source):
         self._unregister_timeout(source)
@@ -177,20 +181,31 @@ class EventLoop:
     def check_signal(self):
         try:
             os.read(self.s_rfd, 1)
-            self.stop = True
+            self._stop = True
         except OSerror:
             pass
     def handle_fds(self, fds):
+        # During iteration, interesting things may happen. As a part
+        # of calling the handler callbacks, the underlying file
+        # objects to which the active fds are pointing may be removed
+        # or replaced by a completely different object. This may lead
+        # to spurious calls to the handler functions, but it's not an
+        # API violation (fds can be spuriously activated for other
+        # reasons). However, it means this function needs to be
+        # prepared for a situation where a fd no longer has a source
+        # registered.
         for fd, event in fds:
             if fd == self.s_rfd:
                 self.check_signal()
             else:
-                source = self.fd_source[fd]
+                source = self.fd_source.get(fd)
+                if source == None:
+                    continue
                 handler = self.source_handler[source]
                 handler()
     def run(self):
-        self.stop = False
-        while not self.stop:
+        self._stop = False
+        while not self._stop:
             try:
                 self.fire_actives()
 
@@ -208,6 +223,8 @@ class EventLoop:
             except IOError as e:
                 if e.errno == errno.EINTR:
                     # Python 2 generates an exception on signals (since EINTR)
-                    self.stop = True
+                    self._stop = True
                 else:
                     raise
+    def stop(self):
+        self._stop = True

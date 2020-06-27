@@ -119,10 +119,10 @@ class Client:
         self.event_loop = event_loop
         self.server = server
         self.term_cb = term_cb
+        self.update_source()
         self.event_loop.add(self.conn_source, self.activate)
         self.subscriptions = {}
         self.connect_time = time.time()
-        self.update_source()
         logger.info("Accepted new client from \"%s\"." %  self.client_ref)
     def format_entry(self, msg):
         if self.client_id != None:
@@ -359,12 +359,13 @@ class Client:
                                    service_props=service.props,
                                    ttl=service.ttl, client_id=service.owner,
                                    orphan_since=service.orphan_since))
-        self.update_source()
     def respond(self, out_wire_msg):
         self.out_wire_msgs.append(out_wire_msg)
+        self.update_source()
     def terminate(self):
         self.info("Disconnected.")
         self.sd.client_disconnect(self.client_id)
+        self.conn_source.update(0)
         self.event_loop.remove(self.conn_source)
         self.conn_sock.close()
         self.conn_sock = None
@@ -381,51 +382,58 @@ class Server:
             sock = xcm.server(server_addr)
             sock.set_blocking(False)
             source = eventloop.XcmSource(sock)
+            source.update(xcm.SO_ACCEPTABLE)
             self.server_socks[source] = sock
-        for source, sock in self.server_socks.items():
+        for source in self.server_socks.keys():
             self.event_loop.add(source, self.sock_activate)
         self.orphan_timer = eventloop.Source()
         self.event_loop.add(self.orphan_timer, self.timer_activate)
         self.clients = []
         self.next_id = 0
-        self.update_sources()
     def sock_activate(self):
-        for sock in self.server_socks.values():
+        for source, sock in self.server_socks.items():
             if len(self.clients) == self.max_clients:
                 sock.finish()
+                source.update(0)
             else:
-                try:
-                    left = self.max_clients - len(self.clients)
-                    for i in range(0, min(MAX_ACCEPT_BATCH, left)):
+                left = self.max_clients - len(self.clients)
+                for i in range(0, min(MAX_ACCEPT_BATCH, left)):
+                    try:
                         conn_sock = sock.accept()
+                        self.update_source(source)
                         client = Client(self.sd, conn_sock, self.event_loop,
                                         self, self.client_terminated)
                         self.clients.append(client)
-                except xcm.error as e:
-                    if e.errno != errno.EAGAIN:
-                        logger.debug("Error accepting client: %s" % e)
-        self.update_sources()
+                    except xcm.error as e:
+                        self.update_source(source)
+                        if e.errno != errno.EAGAIN:
+                            logger.debug("Error accepting client: %s" % e)
+                        break;
     def timer_activate(self):
         timed_out = self.sd.purge_orphans()
         for orphan_id in timed_out:
             logger.debug("Timed out orphan service %x." % orphan_id)
         self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
-    def update_sources(self):
+    def update_source(self, source):
         if len(self.clients) < self.max_clients:
             condition = xcm.SO_ACCEPTABLE
         else:
             condition =  0
-        for source in self.server_socks:
-            source.update(condition)
+        source.update(condition)
     def client_terminated(self, client):
+        if len(self.clients) == self.max_clients:
+            for source in self.server_socks.keys():
+                source.update(xcm.SO_ACCEPTABLE)
         self.clients.remove(client)
-        self.update_sources()
+    def close_server_socks(self):
+        for sock in self.server_socks.values():
+            sock.close()
     def terminate(self):
         for client in self.clients:
             client.terminate()
-        for stream, sock in self.server_socks.items():
+        for stream in self.server_socks.keys():
             self.event_loop.remove(stream)
-            sock.close()
+        self.close_server_socks()
     def check_orphans(self, change_type, after, before):
         if (after != None and after.is_orphan()) or \
            (before != None and before.is_orphan()):

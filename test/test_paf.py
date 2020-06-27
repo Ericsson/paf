@@ -17,6 +17,7 @@ import string
 import signal
 import threading
 import collections
+import multiprocessing
 
 import paf.client as client
 import paf.proto as proto
@@ -24,7 +25,7 @@ import paf.xcm as xcm
 
 from logging.handlers import MemoryHandler
 
-MAX_CLIENTS = 100
+MAX_CLIENTS = 250
 
 SERVER_DEBUG = False
 
@@ -910,6 +911,88 @@ def test_survives_connection_reset(server):
 
     conn = client.connect(domain_addr)
     conn.ping()
+    conn.close()
+
+def test_survives_connection_reset(server):
+    domain_addr = server.random_domain().random_addr()
+    service_ttl = 1
+
+    t = threading.Thread(target=crashing_client,
+                         args=(domain_addr, service_ttl))
+    t.start()
+    t.join()
+
+    time.sleep(service_ttl + 0.25)
+
+    conn = client.connect(domain_addr)
+    conn.ping()
+    conn.close()
+
+class ClientProcess(multiprocessing.Process):
+    def __init__(self, domain_addr, ready_queue):
+        multiprocessing.Process.__init__(self)
+        self.domain_addr = domain_addr
+        self.ready_queue = ready_queue
+        self.stop = False
+    def handle_term(self, signo, stack):
+        self.stop = True
+    def run(self):
+        # to avoid sharing seed among all the clients
+        random.seed(time.time() + os.getpid())
+        signal.signal(signal.SIGTERM, self.handle_term)
+        conn = None
+        while conn == None:
+            try:
+                conn = client.connect(self.domain_addr)
+            except proto.Error:
+                time.sleep(3*random.random())
+
+        service_id = conn.service_id()
+        generation = 0
+        service_props = { "name": { "service-%d" % service_id } }
+        service_ttl = 1
+        conn.publish(service_id, generation, service_props, service_ttl)
+
+        sub_id = conn.subscription_id()
+        conn.subscribe(sub_id, lambda *args, **optargs: None)
+
+        self.ready_queue.put(True)
+        wait_for(conn, lambda: self.stop)
+
+        conn.unpublish(service_id)
+        conn.unsubscribe(sub_id)
+
+        sys.exit(1)
+
+def test_survives_killed_clients(server):
+    domain_addr = server.random_domain().random_addr()
+
+    num_clients = MAX_CLIENTS-1
+    ready_queue = multiprocessing.Queue()
+    processes = []
+    for i in range(0, num_clients):
+        p = ClientProcess(domain_addr, ready_queue)
+        p.start()
+        processes.append(p)
+        ready_queue.get()
+
+    for p in processes:
+        if random.random() < 0.75:
+            p.terminate()
+        else:
+            p.kill()
+
+    time.sleep(1)
+
+    conn = client.connect(domain_addr)
+
+    conn.ping()
+
+    for p in processes:
+        p.join()
+
+    conn.ping()
+
     conn.close()
 
 def test_reconnecting_client_keeps_service_alive(server):
