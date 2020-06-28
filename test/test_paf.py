@@ -150,7 +150,7 @@ def server():
 
 @pytest.yield_fixture(scope='function')
 def md_server():
-    server = random_server(16, 32, 1, 4)
+    server = random_server(8, 16, 1, 4)
     yield server
     server.stop()
 
