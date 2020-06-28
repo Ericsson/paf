@@ -1268,7 +1268,14 @@ def test_many_requests(server):
 
     delayed_close(conn)
 
+def assure_ping(conn, max_latency):
+    start = time.time()
+    conn.ping()
+    latency = time.time() - start
+    assert latency < max_latency
+
 NUM_SLOW_CONN_REQS = 50
+ACCEPTABLE_LATENCY = 0.5
 def test_slow_client(server):
     domain_addr = server.random_domain().random_addr()
     slow_conn = client.connect(domain_addr)
@@ -1286,16 +1293,14 @@ def test_slow_client(server):
     for i in range(0, NUM_SLOW_CONN_REQS):
         slow_conn.services(response_cb = cb)
 
-    start = time.time()
-    fast_conn.ping()
-    latency = time.time() - start
-
-    assert latency < 0.25
+    assure_ping(fast_conn, ACCEPTABLE_LATENCY)
 
     # make sure to fill up the server's socket buffer facing the slow client
     deadline = time.time() + 0.25
     while time.time() < deadline:
         slow_conn.try_send()
+
+    assure_ping(fast_conn, ACCEPTABLE_LATENCY)
 
     assert len(replies) == 0
 
