@@ -118,10 +118,11 @@ try:
     event_loop.run()
 
     logger.info("Exiting.")
+    for server in servers:
+        server.terminate()
     sys.exit(0)
 except Exception as e:
     logger.exception("Terminating due to exception.")
-    sys.exit(1)
-finally:
     for server in servers:
-        server.terminate()
+        server.close_server_socks()
+    sys.exit(1)
