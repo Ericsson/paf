@@ -29,6 +29,12 @@ MAX_CLIENTS = 250
 
 SERVER_DEBUG = False
 
+SERVER_CERT = 'cert/cert-server'
+
+CLIENT_CERT = 'cert/cert-client'
+
+os.environ['XCM_TLS_CERT'] = CLIENT_CERT
+
 random.seed()
 
 def random_name():
@@ -42,16 +48,19 @@ def random_name():
 def random_ux_addr():
     return "ux:%s" % random_name()
 
+def random_port():
+    return random.randint(33000, 60000)
+
 def random_tcp_addr():
-    port = random.randint(35000, 50000)
-    return "tcp:127.0.0.1:%d" % port
+    return "tcp:127.0.0.1:%d" % random_port()
+
+def random_tls_addr():
+    return "tls:127.0.0.1:%d" % random_port()
 
 def random_addr():
-    if random.randint(0, 1) == 0:
-        addr = random_ux_addr()
-    else:
-        addr = random_tcp_addr()
-
+    addr_fun = \
+        random.choice([random_ux_addr, random_tcp_addr, random_tls_addr])
+    addr = addr_fun()
     try:
         server = xcm.server(addr)
         server.close()
@@ -122,7 +131,9 @@ class Server:
         for domain in self.domains:
             cmd.extend(["-m", "%s" % "+".join(domain.addrs)])
 
-        self.server_process = subprocess.Popen(cmd)
+        pafd_env = os.environ.copy()
+        pafd_env['XCM_TLS_CERT'] = SERVER_CERT
+        self.server_process = subprocess.Popen(cmd, env = pafd_env)
 
         time.sleep(0.25)
     def stop(self, signo = signal.SIGTERM):

@@ -2,6 +2,10 @@ AC_INIT(paf, 0.1, [mattias.ronnblom@ericsson.com])
 
 AM_INIT_AUTOMAKE([foreign])
 
+AC_CHECK_PROG(OPENSSL_TOOLS, openssl, yes)
+AS_IF([test x"$OPENSSL_TOOLS" != x"yes"],
+      [AC_MSG_ERROR([OpenSSL tools not installed.])])
+
 AC_ARG_ENABLE([python2],
     AS_HELP_STRING([--enable-python2], [use Python 2]))
 
