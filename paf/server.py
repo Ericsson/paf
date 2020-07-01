@@ -364,6 +364,8 @@ class Client:
         self.update_source()
     def terminate(self):
         self.info("Disconnected.")
+        for sub_id in self.subscriptions.keys():
+            self.sd.remove_subscription(sub_id)
         self.sd.client_disconnect(self.client_id)
         self.conn_source.update(0)
         self.event_loop.remove(self.conn_source)
