@@ -17,7 +17,7 @@ else
 PYTEST=py.test-3
 endif
 
-all: check
+all:
 
 check:
 	export PYTHONPATH=$(PWD):$$PYTHONPATH && \
@@ -39,6 +39,7 @@ count:
 	@wc -l test/*.py
 	@echo "Applications:"
 	@wc -l `git ls-files app`
+
 clean-local:
 	for d in paf app test; do \
 		rm -f $${d}/*.pyc; \
@@ -47,6 +48,7 @@ clean-local:
 	rm -rf .cache
 	rm -f test/domains.d/*
 	rm -f $(UMLPNG)
+
 distclean-local: clean-local
 	find . -name '*~' -print0 | xargs -0 rm -f
 	rm -f missing install-sh missing configure aclocal.m4 Makefile.in \
