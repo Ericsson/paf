@@ -88,43 +88,27 @@ def _assure_open(fun):
         return fun(self, *args, **kwargs)
     return assure_open_wrap
 
-def _mark_dirty(fun):
-    def mark_dirty_wrap(self, *args, **kwargs):
-        self.dirty = True
-        return fun(self, *args, **kwargs)
-    return mark_dirty_wrap
-
 class Socket:
     def __init__(self, xcm_socket):
         self.xcm_socket = xcm_socket
-        self.dirty = True
     @_assure_open
     def close(self):
         if self.xcm_socket != None:
             xcm_close_c(self.xcm_socket)
             self.xcm_socket = None
     @_assure_open
-    @_mark_dirty
     def finish(self):
         rc = xcm_finish_c(self.xcm_socket)
         if rc < 0:
             _raise_io_err()
     @_assure_open
-    @_mark_dirty
     def set_blocking(self, val):
         xcm_set_blocking_c(self.xcm_socket, val)
     @_assure_open
-    @_mark_dirty
     def is_blocking(self):
         return xcm_is_blocking_c(self.xcm_socket)
     @_assure_open
     def want(self, condition):
-        if self.dirty or self.prev_condition != condition:
-            self.prev_want_result = self._want(condition)
-            self.prev_condition = condition
-            self.dirty = False
-        return self.prev_want_result
-    def _want(self, condition):
         int_ary_len = 16
         int_ary_type = c_int*int_ary_len
         fds = int_ary_type()
@@ -136,7 +120,6 @@ class Socket:
         else:
             return (list(fds)[:rc], list(events)[:rc])
     @_assure_open
-    @_mark_dirty
     def get_attr(self, attr_name):
         attr_type = c_int()
         attr_capacity = 1024
@@ -160,13 +143,11 @@ class error(socket.error): pass
 class ConnectionSocket(Socket):
     def __init__(self, xcm_socket):
         Socket.__init__(self, xcm_socket)
-    @_mark_dirty
     def send(self, msg):
         rc = xcm_send_c(self.xcm_socket, msg, len(msg))
         if rc < 0:
             _raise_io_err()
         return 0
-    @_mark_dirty
     def receive(self):
         buf = create_string_buffer(MAX_MSG)
         rc = xcm_receive_c(self.xcm_socket, byref(buf), MAX_MSG)
@@ -177,7 +158,6 @@ class ConnectionSocket(Socket):
 class ServerSocket(Socket):
     def __init__(self, xcm_socket):
         Socket.__init__(self, xcm_socket)
-    @_mark_dirty
     def accept(self):
         xcm_socket = xcm_accept_c(self.xcm_socket)
         if xcm_socket:
