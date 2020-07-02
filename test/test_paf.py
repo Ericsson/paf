@@ -60,14 +60,17 @@ def random_tls_addr():
 def random_addr():
     addr_fun = \
         random.choice([random_ux_addr, random_tcp_addr, random_tls_addr])
-    addr = addr_fun()
-    try:
-        server = xcm.server(addr)
-        server.close()
-        return addr
-    except xcm.error:
-        # Socket likely in use - regenerate address
-        return random_addr()
+    while True:
+        addr = addr_fun()
+        try:
+            # This is an attempt to make sure the address is
+            # free. It's a little racey, but should be good enough.
+            server = xcm.server(addr)
+            server.close()
+            return addr
+        except xcm.error:
+            # Socket likely in use - regenerate address
+            pass
 
 DOMAINS_DIR = 'domains.d'
 
