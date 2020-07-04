@@ -4,6 +4,7 @@
 
 import pytest
 import os
+import errno
 import logging
 import sys
 import time
@@ -185,7 +186,11 @@ def wait_until(conn, timeout):
         if len(client_fds) > 0:
             poll = select.poll()
             client.populate(poll, client_fds, client_events)
-            poll.poll(time_left)
+            try: # only needed in Python 2
+                poll.poll(time_left)
+            except select.error as e:
+                if e.args[0] != errno.EINTR:
+                    raise e
 
         conn.process()
 
@@ -195,7 +200,11 @@ def wait_for(conn, criteria):
         if len(client_fds) > 0:
             poll = select.poll()
             client.populate(poll, client_fds, client_events)
-            poll.poll()
+            try: # only needed in Python 2
+                poll.poll()
+            except select.error as e:
+                if e.args[0] != errno.EINTR:
+                    raise e
         conn.process()
 
 def delayed_close(conn):
@@ -994,7 +1003,8 @@ def test_survives_killed_clients(server):
         if random.random() < 0.75:
             p.terminate()
         else:
-            p.kill()
+            # Python 2 is missing the Process.kill() method
+            os.kill(p.pid, signal.SIGKILL)
 
     time.sleep(1)
 
