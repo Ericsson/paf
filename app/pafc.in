@@ -142,7 +142,7 @@ class Worker(Thread):
         self.dispatch_fun(self._cmd_ping)
     def _cmd_hello(self):
         try:
-            proto_version[0] = conn.hello()
+            proto_version = self.conn.hello()
             print("Negotiated Protocol Version: %d" % proto_version)
             self._ok()
         except client.Error as e:
