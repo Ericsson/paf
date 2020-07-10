@@ -175,12 +175,16 @@ def ms_server():
     yield server
     server.stop()
 
-def wait_until(conn, timeout):
-    deadline = time.time() + timeout
-    while True:
-        time_left = deadline - time.time()
-        if time_left <= 0:
-            break
+def wait(conn, criteria = lambda: False, timeout = None):
+    if timeout != None:
+        deadline = time.time() + timeout
+    while not criteria():
+        if timeout != None:
+            time_left = deadline - time.time()
+            if time_left <= 0:
+                break
+        else:
+            time_left = None
 
         client_fds, client_events = conn.want()
         if len(client_fds) > 0:
@@ -194,23 +198,10 @@ def wait_until(conn, timeout):
 
         conn.process()
 
-def wait_for(conn, criteria):
-    while not criteria():
-        client_fds, client_events = conn.want()
-        if len(client_fds) > 0:
-            poll = select.poll()
-            client.populate(poll, client_fds, client_events)
-            try: # only needed in Python 2
-                poll.poll()
-            except select.error as e:
-                if e.args[0] != errno.EINTR:
-                    raise e
-        conn.process()
-
 def delayed_close(conn):
     # always wait a little, to allow trailing messages to arrive, which
     # might sent in error, and thus should be detected
-    wait_until(conn, 0.01)
+    wait(conn, timeout = 0.01)
     conn.close()
 
 class Recorder:
@@ -330,7 +321,7 @@ def test_batch_publish(server):
         publish_recorders.append(publish_recorder)
 
     for recorder in publish_recorders:
-        wait_for(conn, recorder.completed)
+        wait(conn, criteria = recorder.completed)
 
     delayed_close(conn)
 
@@ -353,16 +344,18 @@ def test_republish_from_new_client(server):
     ta_id = conn_sub.subscribe(conn_sub.subscription_id(),
                                subscription_recorder)
     subscription_recorder.ta_id = ta_id
-    wait_for(conn_sub, subscription_recorder.accepted)
+    wait(conn_sub, criteria = subscription_recorder.accepted)
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() >= 1)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 1)
     assert subscription_recorder.count_notifications() == 1
 
     second_generation = first_generation + 17
     conn_pub1 = client.connect(domain_addr)
     conn_pub1.publish(service_id, second_generation, service_props, service_ttl)
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() >= 2)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 2)
 
     assert subscription_recorder.get_notifications() == [
         (client.EventType.NOTIFY, client.MATCH_TYPE_APPEARED, service_id,
@@ -376,7 +369,7 @@ def test_republish_from_new_client(server):
 
     conn_pub0.close()
 
-    wait_until(conn_sub, 0.1)
+    wait(conn_sub, timeout = 0.1)
 
     assert subscription_recorder.count_notifications() == 2
 
@@ -402,7 +395,7 @@ def test_unpublish_from_non_owner(server):
     ta_id = conn0.publish(service_id, 0, { "name": { "service-x" }},
                           42, publish_recorder)
     publish_recorder.ta_id = ta_id
-    wait_for(conn0, publish_recorder.completed)
+    wait(conn0, criteria = publish_recorder.completed)
 
     conn1 = client.connect(domain_addr)
 
@@ -419,7 +412,7 @@ def test_publish_and_unpublish_trigger_subscription(server):
                            filter='(&(name=service-a)(area=51))')
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.accepted)
+    wait(conn, criteria = subscription_recorder.accepted)
 
     m_service_props = {
         "name" : { "service-a" },
@@ -448,7 +441,8 @@ def test_publish_and_unpublish_trigger_subscription(server):
     # Unpublish trigger subscription
     conn.unpublish(m_service_id)
 
-    wait_for(conn, lambda: subscription_recorder.count_notifications() >= 2)
+    wait(conn, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 2)
 
     notifications = subscription_recorder.get_notifications()
     assert len(notifications) == 2
@@ -465,7 +459,7 @@ def test_publish_and_unpublish_trigger_subscription(server):
         "area" : { 42 }
     }, 99, lambda *args: None)
 
-    wait_until(conn, 0.5)
+    wait(conn, timeout = 0.5)
 
     assert subscription_recorder.count_notifications() == 2
 
@@ -478,7 +472,7 @@ def test_ttl_change_trigger_subscription(server):
     ta_id = conn.subscribe(conn.subscription_id(), subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.accepted)
+    wait(conn, criteria = subscription_recorder.accepted)
 
     service_id = conn.service_id()
     service_props = { 'name': { 'a b c', 'd e f' } }
@@ -493,7 +487,8 @@ def test_ttl_change_trigger_subscription(server):
     conn.publish(service_id, second_generation,
                  service_props, service_second_ttl)
 
-    wait_for(conn, lambda: subscription_recorder.count_notifications() >= 2)
+    wait(conn, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 2)
 
     assert subscription_recorder.get_notifications() == [
         (client.EventType.NOTIFY, client.MATCH_TYPE_APPEARED, service_id,
@@ -525,8 +520,9 @@ def test_subscribe_to_existing_service(server):
                            filter='(name=service-x)')
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, lambda: subscription_recorder.count_notifications() > 0)
-    wait_until(conn, 0.1)
+    wait(conn, criteria = \
+         lambda: subscription_recorder.count_notifications() > 0)
+    wait(conn, timeout = 0.1)
 
     notifications = subscription_recorder.get_notifications()
     assert notifications == [
@@ -550,13 +546,13 @@ def test_subscription_id_errornous_reuse(server):
     ta_id = conn.subscribe(sub_id, subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.accepted)
+    wait(conn, criteria = subscription_recorder.accepted)
 
     subscription_recorder = MultiResponseRecorder()
     ta_id = conn.subscribe(sub_id, subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.failed)
+    wait(conn, criteria = subscription_recorder.failed)
     assert subscription_recorder.get_fail_reason() == \
         proto.FAIL_REASON_SUBSCRIPTION_ID_EXISTS
 
@@ -571,20 +567,20 @@ def test_subscription_id_valid_reuse(server):
     ta_id = conn.subscribe(sub_id, subscribe_recorder)
     subscribe_recorder.ta_id = ta_id
 
-    wait_for(conn, lambda: subscribe_recorder.accepted)
+    wait(conn, criteria = lambda: subscribe_recorder.accepted)
 
     unsubscribe_recorder = SingleResponseRecorder()
     ta_id = conn.unsubscribe(sub_id, unsubscribe_recorder)
     unsubscribe_recorder.ta_id = ta_id
 
-    wait_for(conn, lambda: unsubscribe_recorder.completed and \
-             subscribe_recorder.completed)
+    wait(conn, criteria = lambda: unsubscribe_recorder.completed and \
+         subscribe_recorder.completed)
 
     resubscribe_recorder = MultiResponseRecorder()
     ta_id = conn.subscribe(sub_id, resubscribe_recorder)
     resubscribe_recorder.ta_id = ta_id
 
-    wait_for(conn, resubscribe_recorder.accepted)
+    wait(conn, criteria = resubscribe_recorder.accepted)
 
     conn.close()
 
@@ -596,7 +592,7 @@ def test_subscribe_invalid_syntax_filter(server):
                            filter='(name=service-x')
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.failed)
+    wait(conn, criteria = subscription_recorder.failed)
 
     assert subscription_recorder.get_fail_reason() == \
         proto.FAIL_REASON_INVALID_FILTER_SYNTAX
@@ -618,8 +614,8 @@ def test_modify_existing_trigger_now_matching_subscription(server):
                            filter='(&(name=foo)(area=51))')
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.accepted)
-    wait_until(conn, 0.1)
+    wait(conn, criteria = subscription_recorder.accepted)
+    wait(conn, timeout = 0.1)
 
     notifications = subscription_recorder.get_notifications()
     assert len(notifications) == 0
@@ -630,7 +626,8 @@ def test_modify_existing_trigger_now_matching_subscription(server):
     conn.publish(service_id, service_generations[2],
                  { "name": { "bar" }, "area": { 51 } }, service_ttl)
 
-    wait_for(conn, lambda: subscription_recorder.count_notifications() >= 2)
+    wait(conn, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 2)
 
     notifications = subscription_recorder.get_notifications()
     assert notifications == [
@@ -656,15 +653,15 @@ def test_republish_same_generation_doesnt_trigger_subscription(server):
     ta_id = conn.subscribe(17, subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.accepted)
-    wait_until(conn, 0.1)
+    wait(conn, criteria = subscription_recorder.accepted)
+    wait(conn, timeout = 0.1)
 
     assert subscription_recorder.count_notifications() == 1
 
     conn.publish(service_id, service_generation, service_props, service_ttl)
     conn.publish(service_id, service_generation, {}, service_ttl)
 
-    wait_until(conn, 0.1)
+    wait(conn, timeout = 0.1)
 
     assert subscription_recorder.count_notifications() == 1
 
@@ -684,8 +681,8 @@ def test_republish_older_generation_doesnt_trigger_subscription(server):
     ta_id = conn.subscribe(17, subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn, subscription_recorder.accepted)
-    wait_until(conn, 0.1)
+    wait(conn, criteria = subscription_recorder.accepted)
+    wait(conn, timeout = 0.1)
 
     assert subscription_recorder.count_notifications() == 1
 
@@ -706,11 +703,11 @@ def test_unsubscribe(server):
     subscription_ta_id = conn.subscribe(sub_id, subscription_recorder,
                                         filter='(name=service-x)')
     subscription_recorder.ta_id = subscription_ta_id
-    wait_for(conn, subscription_recorder.accepted)
+    wait(conn, criteria = subscription_recorder.accepted)
 
     conn.unsubscribe(sub_id)
 
-    wait_for(conn, subscription_recorder.completed)
+    wait(conn, criteria = subscription_recorder.completed)
 
     conn.publish(conn.service_id(), 17,
                  { "name" : { "service-x", "service-y" } }, 42)
@@ -729,7 +726,7 @@ def test_unsubscribe_nonexisting(server):
                                          unsubscribe_recorder)
     unsubscribe_recorder.ta_id = unsubscribe_ta_id
 
-    wait_for(conn, unsubscribe_recorder.failed)
+    wait(conn, criteria = unsubscribe_recorder.failed)
     assert unsubscribe_recorder.get_fail_reason() == \
         proto.FAIL_REASON_NON_EXISTENT_SUBSCRIPTION_ID
 
@@ -746,7 +743,7 @@ def test_unsubscribe_from_non_owner(server):
     subscription_ta_id = conn0.subscribe(sub_id, subscription_recorder,
                                          filter='(name=service-x)')
     subscription_recorder.ta_id = subscription_ta_id
-    wait_for(conn0, subscription_recorder.accepted)
+    wait(conn0, criteria = subscription_recorder.accepted)
 
     conn1 = client.connect(domain.default_addr())
 
@@ -754,7 +751,7 @@ def test_unsubscribe_from_non_owner(server):
     unsubscribe_ta_id = conn1.unsubscribe(sub_id, unsubscribe_recorder)
     unsubscribe_recorder.ta_id = unsubscribe_ta_id
 
-    wait_for(conn1, unsubscribe_recorder.failed)
+    wait(conn1, criteria = unsubscribe_recorder.failed)
     assert unsubscribe_recorder.get_fail_reason() == \
         proto.FAIL_REASON_NOT_SUBSCRIPTION_OWNER
 
@@ -781,7 +778,7 @@ def test_list_subscriptions(server):
                                filter=filter)
         subscription_recorder.ta_id = ta_id
 
-        wait_for(conn, subscription_recorder.accepted)
+        wait(conn, criteria = subscription_recorder.accepted)
 
         conns.append(conn)
 
@@ -849,7 +846,7 @@ def test_list_services_with_invalid_filter(server):
     ta_id = conn.services(recorder, filter="(&foo)")
     recorder.ta_id = ta_id
 
-    wait_for(conn, recorder.failed)
+    wait(conn, criteria = recorder.failed)
 
     assert recorder.get_fail_reason() == \
         proto.FAIL_REASON_INVALID_FILTER_SYNTAX
@@ -864,7 +861,7 @@ def test_disconnected_client_orphans_service(server):
     ta_id = conn_sub.subscribe(42, subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn_sub, subscription_recorder.accepted)
+    wait(conn_sub, criteria = subscription_recorder.accepted)
 
     conn_pub = client.connect(domain.default_addr())
 
@@ -878,16 +875,19 @@ def test_disconnected_client_orphans_service(server):
     conn_pub.publish(service_id, service_generation, service_props,
                      service_ttl)
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() == 1)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() == 1)
 
     disconnect_time = time.time()
 
     conn_pub.close()
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() == 2)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() == 2)
     orphan_latency = time.time() - disconnect_time
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() >= 3)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 3)
     timeout_latency = time.time() - disconnect_time
 
     assert orphan_latency < 0.25
@@ -980,7 +980,7 @@ class ClientProcess(multiprocessing.Process):
         conn.subscribe(sub_id, lambda *args, **optargs: None)
 
         self.ready_queue.put(True)
-        wait_for(conn, lambda: self.stop)
+        wait(conn, criteria = lambda: self.stop)
 
         conn.unpublish(service_id)
         conn.unsubscribe(sub_id)
@@ -1037,13 +1037,14 @@ def test_reconnecting_client_keeps_service_alive(server):
     ta_id = conn_sub.subscribe(42, subscription_recorder)
     subscription_recorder.ta_id = ta_id
 
-    wait_for(conn_sub, subscription_recorder.accepted)
+    wait(conn_sub, criteria = subscription_recorder.accepted)
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() == 1)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() == 1)
 
     conn_pub0.close()
 
-    wait_until(conn_sub, service_ttl-1)
+    wait(conn_sub, timeout = service_ttl-1)
 
     assert subscription_recorder.count_notifications() == 2
 
@@ -1052,12 +1053,13 @@ def test_reconnecting_client_keeps_service_alive(server):
     conn_pub1.publish(service_id, service_generation,
                       service_props, service_ttl)
 
-    wait_for(conn_sub, lambda: subscription_recorder.count_notifications() >= 3)
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 3)
 
     # wait for any (errornous!) timeout to happen
-    wait_until(conn_pub1, 2)
+    wait(conn_pub1, timeout = 2)
 
-    wait_until(conn_sub, 0.1)
+    wait(conn_sub, timeout = 0.1)
 
     notifications = subscription_recorder.get_notifications()
     orphan_since = notifications[1][3]['orphan_since']
@@ -1179,7 +1181,7 @@ def test_many_clients(server):
         try:
             conn = None
             conn = client.connect(domain.default_addr())
-            wait_for(conn, conn.ready)
+            wait(conn, criteria = conn.ready)
             conns.append(conn)
         except client.TransportError:
             if conn:
@@ -1190,7 +1192,7 @@ def test_many_clients(server):
         cb = lambda ta_id, *args: replies.append(None)
         conn.ping(cb)
     for i, conn in enumerate(conns):
-        wait_for(conn, lambda: len(replies) == i+1)
+        wait(conn, criteria = lambda: len(replies) == i+1)
 
     last_conn = None
     try:
@@ -1198,7 +1200,7 @@ def test_many_clients(server):
         last_conn = client.connect(domain.default_addr())
         ping_recorder = SingleResponseRecorder()
         last_conn.ping(ping_recorder)
-        wait_until(last_conn, 0.5)
+        wait(last_conn, timeout = 0.5)
         assert not ping_recorder.completed()
         last_conn.close()
     except client.Error:
@@ -1215,13 +1217,13 @@ def test_list_clients(server):
     other_conns = []
     for i in range(0, FEW_CLIENTS):
         other_conn = client.connect(domain.default_addr())
-        wait_for(other_conn, other_conn.ready)
+        wait(other_conn, criteria = other_conn.ready)
         other_conns.append(other_conn)
 
     recorder = MultiResponseRecorder()
     ta_id = conn.clients(recorder)
     recorder.ta_id = ta_id
-    wait_for(conn, recorder.completed)
+    wait(conn, criteria = recorder.completed)
 
     notifications = recorder.get_notifications()
     assert len(notifications) == FEW_CLIENTS + 1
@@ -1288,7 +1290,7 @@ def test_many_requests(server):
     ping_recorders.reverse()
 
     for ping_recorder in ping_recorders:
-        wait_for(conn, ping_recorder.completed)
+        wait(conn, criteria = ping_recorder.completed)
 
     delayed_close(conn)
 
@@ -1330,7 +1332,7 @@ def test_slow_client(server):
 
     expected_responses = (NUM_SERVICES + 2) * NUM_SLOW_CONN_REQS
 
-    wait_for(slow_conn, lambda: len(replies) == expected_responses)
+    wait(slow_conn, criteria = lambda: len(replies) == expected_responses)
 
     slow_conn.close()
     fast_conn.close()
