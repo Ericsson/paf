@@ -9,8 +9,8 @@ import os
 import paf.sd
 import paf.server
 import paf.eventloop
-
-DEFAULT_CLIENTS_MAX = 1000
+import paf.conf
+import paf.compat
 
 def usage(name):
     print("Usage:")
@@ -31,100 +31,99 @@ def usage(name):
     print("  -y <facility>           Set syslog facility to use.")
     print("  -c <max-clients>        Set the maximum number of allowed "
           "connected clients")
-    print("                          to <max-clients>. The default is %d." % \
-          DEFAULT_CLIENTS_MAX)
+    print("                          to <max-clients>. The default "
+          "is no limit.")
     print("  -h                      Print this text.")
 
 logger = logging.getLogger()
 
-level_names = {
-    'debug' : logging.DEBUG,
-    'info' : logging.INFO,
-    'warning' : logging.WARNING,
-    'error' : logging.ERROR,
-    'critical' : logging.CRITICAL
-}
-
-def setup_logging(syslog_only, level, syslog_facility):
-    logging.basicConfig(level=level)
+def setup_logging(console, filter_level, syslog_facility):
+    logging.basicConfig(level=filter_level)
     syslog = SysLogHandler(address = '/dev/log',
                            facility = syslog_facility)
     syslog.ident = 'pafd[%d]: ' % os.getpid()
-    if syslog_only:
+    if not console:
         logger.handlers = []
     logger.addHandler(syslog)
 
-try:
-    optlist, args = getopt.getopt(sys.argv[1:], 'm:sl:y:c:h')
-except getopt.GetoptError as e:
-    print("Error parsning command line: %s." % e)
+def early_error(message):
+    print(message)
     sys.exit(1)
 
-domains = [[domain] for domain in args]
+try:
+    optlist, args = getopt.getopt(sys.argv[1:], 'f:m:sl:y:c:h')
 
-syslog_only = True
-syslog_facility = SysLogHandler.LOG_DAEMON
-level = logging.WARNING
-max_clients = DEFAULT_CLIENTS_MAX
+    conf_filename = None
+    for opt, optval in optlist:
+        if opt == '-f':
+            conf_filename = optval
+    if conf_filename == None:
+        conf = paf.conf.default()
+    else:
+        conf = paf.conf.load(conf_filename)
 
-for opt, optval in optlist:
-    if opt == '-m':
-        domain = []
-        for addr in optval.split('+'):
-            domain.append(addr)
-        domains.append(domain)
-    elif opt == '-s':
-        syslog_only = False
-    elif opt == '-l':
-        level = level_names.get(optval)
-        if level == None:
-            print("Valid levels are: \n%s" % \
-                  "\n".join(level_names.keys()))
-            sys.exit(1)
-    elif opt == '-y':
-        syslog_facility = optval
-        if syslog_facility not in SysLogHandler.facility_names:
-            print("Valid syslog facilities are:\n%s" % \
-                  "\n".join(SysLogHandler.facility_names.keys()))
-            sys.exit(1)
-    elif opt == '-c':
-        try:
-            max_clients = int(optval)
-        except ValueError:
-            print("Argument must be integer.")
-            sys.exit(1)
-    elif opt == '-h':
-        usage(sys.argv[0])
+    domains = [[domain_addr] for domain_addr in args]
+
+    if len(domains) > 0:
+        conf.set_domains(domains)
+
+    for opt, optval in optlist:
+        if opt == '-m':
+            domain = []
+            for addr in optval.split('+'):
+                domain.append(addr)
+            domains.append(domain)
+        elif opt == '-s':
+            conf.log.set_console(True)
+        elif opt == '-l':
+            conf.log.set_filter(optval)
+        elif opt == '-y':
+            conf.log.set_facility(optval)
+        elif opt == '-c':
+            try:
+                clients = int(optval)
+                if clients == 0:
+                    conf.resources.total.clear_limit("clients")
+                else:
+                    conf.resources.total.set_limit("clients", clients)
+            except ValueError:
+                early_error("Client limit must be an integer.")
+        elif opt == '-h':
+            usage(sys.argv[0])
+            sys.exit(0)
+
+    if len(domains) > 0:
+        conf.set_domains(domains)
+
+    if len(conf.domains) == 0:
+        early_error("No domains configured.")
+
+    setup_logging(conf.log.console, conf.log.filter, conf.log.facility)
+
+    logger.info("Server started. Configuration: %s" % conf)
+
+    event_loop = paf.eventloop.EventLoop()
+    try:
+        servers = []
+        for domain in conf.domains:
+            user = conf.resources.user.resources
+            total = conf.resources.total.resources
+            server = paf.server.create(domain.addrs, user, total, event_loop)
+            servers.append(server)
+
+        event_loop.run()
+
+        logger.info("Exiting.")
+        for server in servers:
+            server.terminate()
         sys.exit(0)
+    except Exception as e:
+        logger.exception("Terminating due to exception.")
+        for server in servers:
+            server.close_server_socks()
+        sys.exit(1)
 
-if len(domains) == 0:
-    print("No domains configured.")
-    sys.exit(1)
-
-setup_logging(syslog_only, level, syslog_facility)
-
-event_loop = paf.eventloop.EventLoop()
-try:
-    servers = []
-    for addrs in domains:
-        server = paf.server.create(addrs, max_clients, event_loop)
-        servers.append(server)
-        logger.info("Pathfinder daemon instantiated domain with "
-                    "address(es): \"%s\"." % "\" \"".join(addrs))
-
-    logger.debug("Log level %s and max clients %d." % \
-                 (logging.getLevelName(level), max_clients))
-
-    event_loop.run()
-
-    event_loop.close()
-
-    logger.info("Exiting.")
-    for server in servers:
-        server.terminate()
-    sys.exit(0)
-except Exception as e:
-    logger.exception("Terminating due to exception.")
-    for server in servers:
-        server.close_server_socks()
-    sys.exit(1)
+except getopt.GetoptError as e:
+    early_error("Error parsning command line: %s." % e)
+except (paf.conf.Error, paf.compat.FileNotFoundError) as e:
+    early_error("Error reading configuration file: %s" % e)

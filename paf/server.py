@@ -11,6 +11,7 @@ import paf.sd as sd
 import paf.filter
 import paf.props as props
 import paf.eventloop as eventloop
+import paf.compat as compat
 
 logger = logging.getLogger()
 
@@ -108,10 +109,10 @@ MAX_SEND_BATCH = 64
 MAX_ACCEPT_BATCH = 16
 SOFT_OUT_WIRE_LIMIT = 128
 
-class Client:
+class Connection:
     def __init__(self, sd, conn_sock, event_loop, server, term_cb):
         self.client_id = None
-        self.client_ref = conn_sock.get_attr("xcm.remote_addr")
+        self.conn_addr = conn_sock.get_attr("xcm.remote_addr")
         self.sd = sd
         self.conn_sock = conn_sock
         self.conn_source = eventloop.XcmSource(conn_sock)
@@ -121,15 +122,17 @@ class Client:
         self.term_cb = term_cb
         self.update_source()
         self.event_loop.add(self.conn_source, self.activate)
-        self.subscriptions = {}
+        self.sub_tas = {}
         self.connect_time = time.time()
-        logger.info("Accepted new client from \"%s\"." %  self.client_ref)
+        self.handshaked = False
+        logger.info("Accepted new client connection from \"%s\"." % \
+                    self.conn_addr)
     def format_entry(self, msg):
         if self.client_id != None:
-            client = "%d" % self.client_id
+            client = "0x%x" % self.client_id
         else:
             client = "unknown"
-        return "<client %s> %s" % (client, msg)
+        return "<%s> %s" % (client, msg)
     def debug(self, msg):
         logger.debug(self.format_entry(msg))
     def info(self, msg):
@@ -185,23 +188,77 @@ class Client:
     def request(self, in_wire_msg):
         ta = Transaction(self.debug)
         args, optargs = ta.request(in_wire_msg)
-        if ta.ta_type.cmd == proto.CMD_HELLO or self.client_id != None:
+        if ta.ta_type.cmd == proto.CMD_HELLO or self.handshaked:
             for response in self.invoke_handler(ta, args, optargs):
                 self.respond(response)
         else:
-            self.warning("Client attempted to issue \"%s\" before issuing "
-                         "\"%s\"." % (ta.ta_type.cmd, proto.CMD_HELLO))
-            ta.respond(ta.fail(fail_reason = proto.FAIL_REASON_NO_HELLO))
+            self.warning("Attempt to issue \"%s\" before issuing \"%s\"." % \
+                         (ta.ta_type.cmd, proto.CMD_HELLO))
+            self.respond(ta.fail(fail_reason = proto.FAIL_REASON_NO_HELLO))
     def invoke_handler(self, ta, args, optargs):
         fun_name = "%s_request" % ta.ta_type.cmd.replace("-", "_")
         fun = getattr(self, fun_name)
         return fun(ta, *args, **optargs)
+    def determine_user_id(self):
+        user_id = None
+        if self.conn_addr.startswith("tls"):
+            try:
+                subject_key_id = \
+                    self.conn_sock.get_attr("tls.peer_subject_key_id")
+                subject_key_id_s = compat.bytes_to_hex(subject_key_id)
+                user_id = "ski:%s" % subject_key_id_s
+            except xcm.error as e:
+                log.warning("Unable to retrieve X509v3 Subject Key "
+                            "Identifier. This attribute only exists in "
+                            "XCM version 12 or later.")
+        if self.conn_addr.startswith("tcp") or \
+           (user_id == None and self.conn_addr.startswith("tls")):
+            ip = self.conn_addr.split(":")[1]
+            user_id = "ip:%s" % ip
+        if user_id == None:
+            user_id = sd.DEFAULT_USER_ID
+        return user_id
     def hello_request(self, ta, client_id, min_version, max_version):
-        self.client_id = client_id
-        self.debug("Client 0x%x supports protocol versions between "
-                   "%d and %d." % (client_id, min_version, max_version))
-        if proto.VERSION >= min_version and proto.VERSION <= max_version:
+        if self.client_id == None:
+            self.client_id = client_id
+        elif self.client_id != client_id:
+            self.warning("Attempt to change client id denied.")
+            yield ta.fail(fail_reason = proto.FAIL_PERMISSION_DENIED)
+            return
+        elif self.handshaked:
+            self.debug("Received hello from client with handshake "
+                       "procedure already successfully completed.")
             yield ta.complete(proto.VERSION)
+            return
+        if min_version == max_version:
+            self.debug("Client supports protocol version %d (only)." % \
+                       min_version)
+        else:
+            self.debug("Client supports protocol versions between "
+                       "%d and %d." % (min_version, max_version))
+        user_id = self.determine_user_id()
+        self.info("User id is \"%s\"." % user_id)
+        if proto.VERSION >= min_version and proto.VERSION <= max_version:
+            try:
+                self.sd.client_connect(self.client_id, user_id)
+                self.debug("Handshake producedure finished.")
+                self.handshaked = True
+                yield ta.complete(proto.VERSION)
+            except sd.AlreadyExistsError as e:
+                self.warning("Client %x is already connected." % client_id)
+                # There's a race between which of client and server
+                # sees that the connection is down. If the client
+                # wins, he might reconnect before the server has yet
+                # realized the "old" client connection is down, and
+                # this will cause the new hello request to
+                # fail. However, the client will retry, so it's not an
+                # issue.
+                yield ta.fail(fail_reason = \
+                              proto.FAIL_REASON_CLIENT_ID_EXISTS)
+            except sd.ResourceError as e:
+                self.warning("Unable to connect: %s." % e)
+                yield ta.fail(fail_reason =
+                              proto.FAIL_REASON_INSUFFICIENT_RESOURCES)
         else:
             self.warning("Client doesn't support protocol version %d." % \
                          proto.VERSION)
@@ -209,15 +266,11 @@ class Client:
                           proto.FAIL_REASON_UNSUPPORTED_PROTOCOL_VERSION)
     def subscribe_request(self, ta, sub_id, filter=None):
         try:
-            if self.sd.has_subscription(sub_id):
-                yield ta.fail(fail_reason = \
-                              proto.FAIL_REASON_SUBSCRIPTION_ID_EXISTS)
-                return
             if filter != None:
                 filter = paf.filter.parse(filter)
             self.sd.create_subscription(sub_id, filter, self.client_id,
                                         self.subscription_triggered)
-            self.subscriptions[sub_id] = ta
+            self.sub_tas[sub_id] = ta
             log_msg = "Assigned subscription id %d to new subscription" % \
                       sub_id
             if filter != None:
@@ -230,39 +283,44 @@ class Client:
             # server has gotten the subscription id.
             self.sd.activate_subscription(sub_id)
         except paf.filter.ParseError as e:
-            self.debug("Received subscription request with malformed "
-                       "filter: %s." % str(e))
+            self.warning("Received subscription request with malformed "
+                         "filter: %s." % str(e))
             yield ta.fail(fail_reason = proto.FAIL_REASON_INVALID_FILTER_SYNTAX)
+        except sd.AlreadyExistsError as e:
+            self.warning("Received invalid subscription request: %s." % e)
+            yield ta.fail(fail_reason = \
+                          proto.FAIL_REASON_SUBSCRIPTION_ID_EXISTS)
+        except sd.ResourceError as e:
+            self.warning("Resource error processing subscription request %x: "
+                         "%s." % (sub_id, e))
+            yield ta.fail(fail_reason = \
+                          proto.FAIL_REASON_INSUFFICIENT_RESOURCES)
     def unsubscribe_request(self, ta, sub_id):
-        if sub_id in self.subscriptions:
-            sub_ta = self.subscriptions[sub_id]
-            self.sd.remove_subscription(sub_id)
-            del self.subscriptions[sub_id]
+        try:
+            self.sd.remove_subscription(sub_id, self.client_id)
+            sub_ta = self.sub_tas[sub_id]
+            del self.sub_tas[sub_id]
             yield sub_ta.complete()
             yield ta.complete()
             self.debug("Canceled subscription %d in transaction %d." % \
                        (sub_id, sub_ta.ta_id))
-        else:
-            if sub_id in self.sd.subscriptions:
-                yield ta.fail(fail_reason = \
-                              proto.FAIL_REASON_NOT_SUBSCRIPTION_OWNER)
-                self.debug("Attempted to unsubscribe to subscription %d "
-                           "not owned by this client." % sub_id)
-            else:
-                yield ta.fail(fail_reason = \
-                              proto.FAIL_REASON_NON_EXISTENT_SUBSCRIPTION_ID)
-                self.debug("Attempted to unsubscribe to non-existent "
-                           "subscription %d." % sub_id)
+        except sd.PermissionError as e:
+            self.warning("Permission error while unsubscribing %x: "
+                         "%s." % (sub_id, e))
+            yield ta.fail(fail_reason = proto.FAIL_REASON_PERMISSION_DENIED)
+        except sd.NotFoundError as e:
+            self.warning("Attempted to unsubscribe to non-existent "
+                         "subscription %d." % sub_id)
+            yield ta.fail(fail_reason = \
+                          proto.FAIL_REASON_NON_EXISTENT_SUBSCRIPTION_ID)
     def subscriptions_request(self, ta):
         yield ta.accept()
-        for client in self.server.clients:
-            for sub_id in client.subscriptions:
-                sub = self.sd.subscriptions[sub_id]
-                if sub.filter != None:
-                    filter = str(sub.filter)
-                else:
-                    filter = None
-                yield ta.notify(sub_id, client.client_id, filter=filter)
+        for sub in self.sd.get_subscriptions():
+            if sub.filter != None:
+                filter = str(sub.filter)
+            else:
+                filter = None
+            yield ta.notify(sub.sub_id, sub.client_id, filter=filter)
         yield ta.complete()
     def services_request(self, ta, filter=None):
         try:
@@ -276,7 +334,8 @@ class Client:
             for service in self.sd.get_services():
                 if filter == None or filter.match(service.props):
                     yield ta.notify(service.service_id, service.generation,
-                                    service.props, service.ttl, service.owner,
+                                    service.props, service.ttl,
+                                    service.client_id,
                                     orphan_since=service.orphan_since)
             yield ta.complete()
         except paf.filter.ParseError as e:
@@ -285,58 +344,70 @@ class Client:
             yield ta.fail(fail_reason = \
                           proto.FAIL_REASON_INVALID_FILTER_SYNTAX)
     def publish_request(self, ta, service_id, generation, service_props, ttl):
-        service = self.sd.publish(service_id, generation, service_props,
-                                  ttl, self.client_id)
-
-        if service == None:
-            self.warning("Re-publication of id %x did not cause a change." % \
-                         service_id)
-        elif service.before == None:
-            self.debug("Published new service with id %x, generation %d, "
-                       "props %s and TTL %d s." % \
-                       (service_id, generation, props.to_str(service_props), \
-                        ttl))
-        else:
-            log_msg = "Re-published service with id %x. Generation %d -> %d." \
-                % (service_id, service.before.generation, service.generation)
-            if service.before.is_orphan():
-                      log_msg += " Replacing orphan."
-            if service.props != service.before.props:
-                log_msg += " Properties changed from %s to %s." \
-                           % (props.to_str(service.before.props),
-                              props.to_str(service.props))
-            if service.ttl != service.before.ttl:
-                log_msg += " TTL changed from %d to %d s." \
-                           % (service.before.ttl, service.ttl)
-            if service.owner != service.before.owner:
-                log_msg += " Owner is changed from %x to %x." \
-                           % (service.before.owner, service.owner)
-            self.debug(log_msg)
-            if generation < service.before.generation:
-                self.warning("Re-published service with lower generation "
-                             "(%d replacing %d)." % (generation, \
-                                                     service.before.generation))
-        yield ta.complete()
+        try:
+            service = self.sd.publish(service_id, generation, service_props,
+                                      ttl, self.client_id)
+            if service.before == None:
+                self.debug("Published new service with id %x, generation %d, "
+                           "props %s and TTL %d s." % \
+                           (service_id, generation, \
+                            props.to_str(service_props), ttl))
+            else:
+                log_msg = "Re-published service with id %x. " \
+                    "Generation %d -> %d." \
+                    % (service_id, service.before.generation, \
+                       service.generation)
+                if service.before.is_orphan():
+                          log_msg += " Replacing orphan."
+                if service.props != service.before.props:
+                    log_msg += " Properties changed from %s to %s." \
+                               % (props.to_str(service.before.props),
+                                  props.to_str(service.props))
+                if service.ttl != service.before.ttl:
+                    log_msg += " TTL changed from %d to %d s." \
+                               % (service.before.ttl, service.ttl)
+                if service.client_id != service.before.client_id:
+                    log_msg += " Owner is changed from %x to %x." \
+                               % (service.before.client_id, service.client_id)
+                self.debug(log_msg)
+            yield ta.complete()
+        except sd.PermissionError as e:
+            self.warning("Permission error while publishing service %x: "
+                         "%s." % (service_id, e))
+            yield ta.fail(fail_reason = proto.FAIL_REASON_PERMISSION_DENIED)
+        except sd.ResourceError as e:
+            self.warning("Resource error while publishing service %x: "
+                         "%s." % (service_id, e))
+            yield ta.fail(fail_reason =
+                          proto.FAIL_REASON_INSUFFICIENT_RESOURCES)
+        except sd.GenerationError as e:
+            self.warning("Error while re-publishing service %x: %s." % \
+                         (service_id, e))
+            yield ta.fail(fail_reason = proto.FAIL_REASON_OLD_GENERATION)
     def unpublish_request(self, ta, service_id):
-        if not self.sd.has_service(service_id):
-            self.debug("Attempted to unpublish non-existent service "
-                       "id %d" % service_id)
-            yield ta.fail(fail_reason = \
-                          proto.FAIL_REASON_NON_EXISTENT_SERVICE_ID)
-        else:
+        try:
             service_props = self.sd.get_service(service_id).props
-            self.sd.unpublish(service_id)
+            self.sd.unpublish(service_id, self.client_id)
             self.debug("Unpublished service %s with service id %x." % \
                        (props.to_str(service_props), service_id))
             yield ta.complete()
+        except sd.PermissionError as e:
+            self.warning("Permission error while trying to unpublish service "
+                         "id %x: %s." % (service_id, e))
+            yield ta.fail(fail_reason = proto.FAIL_REASON_PERMISSION_DENIED)
+        except sd.NotFoundError:
+            self.warning("Attempted to unpublish non-existent service "
+                         "id %d." % service_id)
+            yield ta.fail(fail_reason = \
+                          proto.FAIL_REASON_NON_EXISTENT_SERVICE_ID)
     def ping_request(self, ta):
         yield ta.complete()
     def clients_request(self, ta):
         yield ta.accept()
-        for client in self.server.clients:
-            if client.client_id != None:
-                yield ta.notify(client.client_id, client.client_ref,
-                                int(client.connect_time))
+        for conn in self.server.connections:
+            if conn.client_id != None:
+                yield ta.notify(conn.client_id, conn.conn_addr,
+                                int(conn.connect_time))
         yield ta.complete()
     def subscription_triggered(self, sub_id, match_type, service):
         subscription = self.server.sd.get_subscription(sub_id)
@@ -345,28 +416,27 @@ class Client:
         else:
             filter_s = "without filter"
         self.debug("Subscription id %d %s received %s event by "
-                   "service id %x with properties %s" % \
+                   "service id %x with properties %s." % \
                    (sub_id, filter_s, match_type.name,
                     service.service_id, props.to_str(service.props)))
         proto_match_type = getattr(proto, "MATCH_TYPE_%s" %
                                     match_type.name)
-        ta = self.subscriptions[sub_id]
+        ta = self.sub_tas[sub_id]
         if match_type == sd.MatchType.DISAPPEARED:
             self.respond(ta.notify(proto_match_type, service.service_id))
         else:
             self.respond(ta.notify(proto_match_type, service.service_id,
                                    generation=service.generation,
                                    service_props=service.props,
-                                   ttl=service.ttl, client_id=service.owner,
+                                   ttl=service.ttl, client_id=service.client_id,
                                    orphan_since=service.orphan_since))
     def respond(self, out_wire_msg):
         self.out_wire_msgs.append(out_wire_msg)
         self.update_source()
     def terminate(self):
         self.info("Disconnected.")
-        for sub_id in self.subscriptions.keys():
-            self.sd.remove_subscription(sub_id)
-        self.sd.client_disconnect(self.client_id)
+        if self.handshaked:
+            self.sd.client_disconnect(self.client_id)
         self.event_loop.remove(self.conn_source)
         self.conn_sock.close()
         self.conn_sock = None
@@ -374,9 +444,10 @@ class Client:
         self.term_cb(self)
 
 class Server:
-    def __init__(self, server_addrs, max_clients, event_loop):
-        self.sd = sd.ServiceDiscovery(self.check_orphans)
-        self.max_clients = max_clients
+    def __init__(self, server_addrs, max_user_resources, max_total_resources,
+                 event_loop):
+        self.sd = sd.ServiceDiscovery(max_user_resources, max_total_resources,
+                                      self.check_orphans)
         self.event_loop = event_loop
         self.server_socks = {}
         for server_addr in server_addrs:
@@ -389,22 +460,33 @@ class Server:
             self.event_loop.add(source, self.sock_activate)
         self.orphan_timer = eventloop.Source()
         self.event_loop.add(self.orphan_timer, self.timer_activate)
-        self.clients = []
+        self.connections = []
         self.next_id = 0
+    def max_clients_reached(self):
+        max_clients = self.sd.max_total_clients()
+        reached = max_clients != None and len(self.connections) == max_clients
+        return reached
     def sock_activate(self):
         for source, sock in self.server_socks.items():
-            if len(self.clients) == self.max_clients:
+            if self.max_clients_reached():
                 sock.finish()
                 source.update(0)
             else:
-                left = self.max_clients - len(self.clients)
+                max_clients = self.sd.max_total_clients()
+                if max_clients != None:
+                    # At most one client per connection, so this is an
+                    # conservative estimate (as some connections may
+                    # not yet be considered clients).
+                    left = max_clients - len(self.connections)
+                else:
+                    left = MAX_ACCEPT_BATCH
                 for i in range(0, min(MAX_ACCEPT_BATCH, left)):
                     try:
                         conn_sock = sock.accept()
                         self.update_source(source)
-                        client = Client(self.sd, conn_sock, self.event_loop,
-                                        self, self.client_terminated)
-                        self.clients.append(client)
+                        conn = Connection(self.sd, conn_sock, self.event_loop,
+                                          self, self.conn_terminated)
+                        self.connections.append(conn)
                     except xcm.error as e:
                         self.update_source(source)
                         if e.errno != errno.EAGAIN:
@@ -416,22 +498,22 @@ class Server:
             logger.debug("Timed out orphan service %x." % orphan_id)
         self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
     def update_source(self, source):
-        if len(self.clients) < self.max_clients:
-            condition = xcm.SO_ACCEPTABLE
+        if self.max_clients_reached():
+            condition = 0
         else:
-            condition =  0
+            condition = xcm.SO_ACCEPTABLE
         source.update(condition)
-    def client_terminated(self, client):
-        if len(self.clients) == self.max_clients:
+    def conn_terminated(self, conn):
+        if self.max_clients_reached():
             for source in self.server_socks.keys():
                 source.update(xcm.SO_ACCEPTABLE)
-        self.clients.remove(client)
+        self.connections.remove(conn)
     def close_server_socks(self):
         for sock in self.server_socks.values():
             sock.close()
     def terminate(self):
-        for client in self.clients:
-            client.terminate()
+        for conn in self.connections:
+            conn.terminate()
         for stream in self.server_socks.keys():
             self.event_loop.remove(stream)
         self.close_server_socks()
@@ -440,5 +522,5 @@ class Server:
            (before != None and before.is_orphan()):
             self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
 
-def create(addrs, max_clients, event_loop):
-    return Server(addrs, max_clients, event_loop)
+def create(addrs, max_user_resources, max_total_resources, event_loop):
+    return Server(addrs, max_user_resources, max_total_resources, event_loop)

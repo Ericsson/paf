@@ -340,9 +340,13 @@ class Client:
                 raise TransportError(str(e))
         except ValueError:
             raise ProtocolError("Error decoding response message JSON")
-    def initial_hello_cb(self, ta_id, event, *args):
+    def initial_hello_cb(self, ta_id, event, *args, **optargs):
         if event == EventType.FAIL:
-            raise ProtocolError("Protocol negotiation failed")
+            reason = optargs.get('fail_reason')
+            if reason == None:
+                reason = "reason unknown"
+            raise ProtocolError("Protocol establishment failed: %s" % \
+                                reason)
         elif event == EventType.COMPLETE:
             selected_version = args[0]
             if proto.VERSION != selected_version:
@@ -382,8 +386,10 @@ def domain_addr(domain):
 def allocate_client_id():
     return random.randint(0, ((1<<63) - 1))
 
-def connect(domain_or_addr):
+def connect(domain_or_addr, client_id = None):
     addr = domain_addr(domain_or_addr)
     if addr == None:
         addr = domain_or_addr
-    return Client(allocate_client_id(), addr)
+    if client_id == None:
+        client_id = allocate_client_id()
+    return Client(client_id, addr)

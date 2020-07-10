@@ -11,7 +11,7 @@ UMLSRC=doc/pub_client_long_disconnect.plantuml \
 	doc/server_restart.plantuml
 UMLPNG=$(patsubst %.plantuml,%.png,$(UMLSRC))
 
-XCMCERTNAMES=server client
+XCMCERTNAMES=server client0 client1 client2
 XCMCERTDIRS=$(foreach name,$(XCMCERTNAMES), test/cert/cert-$(name))
 XCMCERTS=$(foreach dir,$(XCMCERTDIRS), $(dir)/cert.pem)
 
@@ -81,6 +81,7 @@ clean-local:
 	done
 	rm -rf .cache
 	rm -f test/domains.d/*
+	rm -f test/test-pafd.conf
 	rm -rf $(XCMCERTDIRS) test/cert/ca
 	rm -f $(UMLPNG)
 

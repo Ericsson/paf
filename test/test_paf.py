@@ -20,6 +20,7 @@ import signal
 import threading
 import collections
 import multiprocessing
+import yaml
 
 import paf.client as client
 import paf.proto as proto
@@ -33,9 +34,10 @@ SERVER_DEBUG = False
 
 SERVER_CERT = 'cert/cert-server'
 
-CLIENT_CERT = 'cert/cert-client'
+NUM_CLIENT_CERTS = 3
+CLIENT_CERTS = ["cert/cert-client%d" % n for n in range(0, NUM_CLIENT_CERTS)]
 
-os.environ['XCM_TLS_CERT'] = CLIENT_CERT
+os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
 
 random.seed()
 
@@ -75,12 +77,12 @@ def random_addr():
             pass
 
 DOMAINS_DIR = 'domains.d'
+CONFIG_FILE = 'test-pafd.conf'
 
 class Domain:
     def __init__(self, name, addrs):
         self.name = name
         self.addrs = addrs
-        self.server_process = None
         self.file = "%s/%s" % (DOMAINS_DIR, self.name)
         self.set_mapped_addr(self.default_addr())
     def set_mapped_addr(self, addr):
@@ -99,6 +101,8 @@ class Server:
     def __init__(self):
         self.domains = []
         self.process = None
+        self.use_config_file = False
+        self.resources = None
 
         os.environ['PAF_DOMAINS'] = DOMAINS_DIR
         os.system("mkdir -p %s" % DOMAINS_DIR)
@@ -113,6 +117,9 @@ class Server:
         domain = Domain(name, addrs)
         self.domains.append(domain)
         return domain
+    def set_resources(self, resources):
+        self.resources = resources
+        self.use_config_file = True
     def is_addr_used(self, addr):
         for domain in self.domains:
             if addr in domain.addrs:
@@ -126,27 +133,63 @@ class Server:
             if not self.is_addr_used(addr):
                 addrs.append(addr)
         return self.configure_domain(name, addrs)
+    def _write_config_file(self):
+        conf = {}
+        if SERVER_DEBUG:
+            log_conf = {}
+            log_conf["filter"] = "debug"
+            conf["log"] = log_conf
+        domains_conf = []
+        for domain in self.domains:
+            domains_conf.append({ "addrs": domain.addrs })
+        conf["domains"] = domains_conf
+        if self.resources != None:
+            conf["resources"] = self.resources
+        with open(CONFIG_FILE, 'w') as file:
+            yaml.dump(conf, file)
+    def _cmd(self):
+        cmd = [ "pafd" ]
+        if self.use_config_file:
+            self._write_config_file()
+            cmd.extend(["-f", CONFIG_FILE])
+        else:
+            cmd.extend(["-c", str(MAX_CLIENTS)])
+            if SERVER_DEBUG:
+                cmd.extend(["-l", "debug"])
+            for domain in self.domains:
+                cmd.extend(["-m", "%s" % "+".join(domain.addrs)])
+        return cmd
+    def _assure_up(self):
+        # assumes the last address in the last domain is bound last
+        domain = self.domains[-1]
+        addr = domain.addrs[-1]
+        conn = None
+        while True:
+            try:
+                conn = client.connect(addr)
+                conn.ping()
+                conn.close()
+                return
+            except client.Error:
+                if conn != None:
+                    conn.close()
+                time.sleep(0.05)
     def start(self):
         if self.process != None:
             return
-        cmd = [ "pafd", "-c", str(MAX_CLIENTS) ]
-        if SERVER_DEBUG:
-            cmd.extend(["-l", "debug", "-s"])
-
-        for domain in self.domains:
-            cmd.extend(["-m", "%s" % "+".join(domain.addrs)])
-
+        cmd = self._cmd()
         pafd_env = os.environ.copy()
         pafd_env['XCM_TLS_CERT'] = SERVER_CERT
         self.process = subprocess.Popen(cmd, env = pafd_env)
-
-        time.sleep(0.25)
+        self._assure_up()
     def stop(self, signo = signal.SIGTERM):
         if self.process == None:
             return
         self.process.send_signal(signo)
+        self.process.wait()
+        if self.use_config_file:
+            os.remove(CONFIG_FILE)
         self.process = None
-        time.sleep(0.1)
 
 def random_server(min_domains, max_domains, min_addrs_per_domain,
                   max_addrs_per_domain):
@@ -182,6 +225,42 @@ def tls_server():
     server.configure_domain(random_name(), random_tls_addr())
     server.start()
     return server
+
+MAX_USER_CLIENTS = 3
+MAX_TOTAL_CLIENTS = 5
+MAX_USER_SERVICES = 128
+MAX_TOTAL_SERVICES = 192
+MAX_USER_SUBSCRIPTIONS = 99
+MAX_TOTAL_SUBSCRIPTIONS = 100
+
+def limited_server(resources):
+    server = Server()
+    server.configure_domain(random_name(), random_tls_addr())
+    server.configure_domain(random_name(), random_ux_addr())
+    server.set_resources(resources)
+    server.start()
+    return server
+
+@pytest.yield_fixture(scope='function')
+def limited_clients_server():
+    return limited_server({
+        "user": { "clients": MAX_USER_CLIENTS },
+        "total" : { "clients": MAX_TOTAL_CLIENTS }
+    })
+
+@pytest.yield_fixture(scope='function')
+def limited_services_server():
+    return limited_server({
+        "user": { "services": MAX_USER_SERVICES },
+        "total" : { "services": MAX_TOTAL_SERVICES }
+    })
+
+@pytest.yield_fixture(scope='function')
+def limited_subscriptions_server():
+    return limited_server({
+        "user": { "subscriptions": MAX_USER_SUBSCRIPTIONS },
+        "total" : { "subscriptions": MAX_TOTAL_SUBSCRIPTIONS }
+    })
 
 def set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -330,6 +409,21 @@ def test_hello(server):
     proto_version = conn.hello()[0]
     assert proto_version == proto.VERSION
 
+def test_invalid_client_id_reuse(server):
+    client_id = client.allocate_client_id()
+    conn0 = client.connect(server.default_domain().random_addr(),
+                           client_id = client_id)
+    conn0.ping()
+    conn1 = None
+    with pytest.raises(client.ProtocolError, match=".*client-id-exists.*"):
+        conn1 = client.connect(server.default_domain().random_addr(),
+                               client_id = client_id)
+        conn1.ping()
+    if conn1 != None:
+        conn1.close()
+    conn0.ping()
+    conn0.close()
+
 NUM_SERVICES = 1000
 def test_batch_publish(server):
     conn = client.connect(server.random_domain().random_addr())
@@ -353,19 +447,20 @@ def test_batch_publish(server):
 
     delayed_close(conn)
 
-def test_republish_from_new_client(server):
-    domain_addr = server.random_domain().random_addr()
-    conn_pub0 = client.connect(domain_addr)
+def run_republish_orphan(domain_addr, new_generation = True,
+                         reused_client_id = None):
+    conn_pub0 = client.connect(domain_addr, client_id = reused_client_id)
 
     service_id = conn_pub0.service_id()
     first_generation = 1
-    service_props = {
+    first_service_props = {
         "name": { "service-x" },
         "value": { 0 }
     }
     service_ttl = 42
 
-    conn_pub0.publish(service_id, first_generation, service_props, service_ttl)
+    conn_pub0.publish(service_id, first_generation,
+                      first_service_props, service_ttl)
 
     conn_sub = client.connect(domain_addr)
     subscription_recorder = MultiResponseRecorder()
@@ -378,31 +473,79 @@ def test_republish_from_new_client(server):
          lambda: subscription_recorder.count_notifications() >= 1)
     assert subscription_recorder.count_notifications() == 1
 
-    second_generation = first_generation + 17
-    conn_pub1 = client.connect(domain_addr)
-    conn_pub1.publish(service_id, second_generation, service_props, service_ttl)
+    if new_generation:
+        second_generation = first_generation + 17
+        second_service_props = {
+            "name": { "service-x" },
+            "value": { 1 }
+        }
+    else:
+        second_generation = first_generation
+        second_service_props = first_service_props
+
+    conn_pub0.close()
 
     wait(conn_sub, criteria = \
          lambda: subscription_recorder.count_notifications() >= 2)
 
-    assert subscription_recorder.get_notifications() == [
+    conn_pub1 = client.connect(domain_addr, client_id = reused_client_id)
+    conn_pub1.publish(service_id, second_generation,
+                      second_service_props, service_ttl)
+
+    wait(conn_sub, criteria = \
+         lambda: subscription_recorder.count_notifications() >= 3)
+
+    notifications = subscription_recorder.get_notifications()
+    orphan_since = notifications[1][3]['orphan_since']
+
+    appeared = \
         (client.EventType.NOTIFY, client.MATCH_TYPE_APPEARED, service_id,
-         { 'service_props': service_props, 'generation': first_generation,
-           'ttl': service_ttl, 'client_id': conn_pub0.client_id }),
+         { 'generation': first_generation,
+           'service_props': first_service_props, 'ttl': service_ttl,
+           'client_id': conn_pub0.client_id })
+    orphanized = \
+        (client.EventType.NOTIFY, client.MATCH_TYPE_MODIFIED, service_id,
+         { 'generation': first_generation,
+           'service_props': first_service_props, 'ttl': service_ttl,
+           'client_id': conn_pub0.client_id,
+           'orphan_since': orphan_since })
+    parented = \
         (client.EventType.NOTIFY, client.MATCH_TYPE_MODIFIED, service_id,
          { 'generation': second_generation,
-           'service_props': service_props, 'ttl': service_ttl,
+           'service_props': second_service_props, 'ttl': service_ttl,
            'client_id': conn_pub1.client_id })
-    ]
 
-    conn_pub0.close()
+    assert subscription_recorder.get_notifications() == \
+        [ appeared, orphanized, parented]
 
     wait(conn_sub, timeout = 0.1)
 
-    assert subscription_recorder.count_notifications() == 2
+    assert subscription_recorder.count_notifications() == 3
 
     conn_pub1.close()
     conn_sub.close()
+
+def test_republish_new_generation_orphan_from_same_client_id(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_republish_orphan(domain_addr, new_generation = True,
+                         reused_client_id = client_id)
+
+def test_republish_same_generation_orphan_from_same_client(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_republish_orphan(domain_addr, new_generation = False,
+                         reused_client_id = client_id)
+
+def test_republish_new_generation_orphan_from_different_client(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_republish_orphan(domain_addr, new_generation = True)
+
+def test_republish_same_generation_orphan_from_different_client(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_republish_orphan(domain_addr, new_generation = False)
 
 def test_unpublish_nonexisting_service(server):
     conn = client.connect(server.random_domain().random_addr())
@@ -414,7 +557,70 @@ def test_unpublish_nonexisting_service(server):
 
     delayed_close(conn)
 
-def test_unpublish_from_non_owner(server):
+def test_republish_same_generation_non_orphan_same_connection(server):
+    conn = client.connect(server.random_domain().random_addr())
+
+    service_id = conn.service_id()
+    service_generation = 99
+    service_props = { "name": { "foo" } }
+    service_ttl = 42
+
+    conn.publish(service_id, service_generation, service_props, service_ttl)
+
+    subscription_recorder = MultiResponseRecorder()
+    ta_id = conn.subscribe(17, subscription_recorder)
+    subscription_recorder.ta_id = ta_id
+
+    wait(conn, criteria = subscription_recorder.accepted)
+    wait(conn, timeout = 0.1)
+
+    assert subscription_recorder.count_notifications() == 1
+
+    conn.publish(service_id, service_generation, service_props, service_ttl)
+    conn.publish(service_id, service_generation, {}, service_ttl)
+
+    wait(conn, timeout = 0.1)
+
+    notifications = subscription_recorder.get_notifications()
+
+    assert subscription_recorder.count_notifications() == 1
+
+    conn.close()
+
+def test_republish_same_and_older_generation(server):
+    conn = client.connect(server.random_domain().random_addr())
+
+    service_id = conn.service_id()
+    service_generations = [10, 11]
+    service_props = { "name": { "foo" } }
+    service_ttl = 42
+
+    conn.publish(service_id, service_generations[1], service_props, service_ttl)
+
+    subscription_recorder = MultiResponseRecorder()
+    ta_id = conn.subscribe(17, subscription_recorder)
+    subscription_recorder.ta_id = ta_id
+
+    wait(conn, criteria = subscription_recorder.accepted)
+    wait(conn, timeout = 0.1)
+
+    assert subscription_recorder.count_notifications() == 1
+
+    conn.publish(service_id, service_generations[1], service_props, service_ttl)
+
+    assert subscription_recorder.count_notifications() == 1
+
+    reason = proto.FAIL_REASON_OLD_GENERATION
+    with pytest.raises(client.TransactionError, match=".*%s.*" % reason):
+        service_props = {}
+        conn.publish(service_id, service_generations[0],
+                     service_props, service_ttl)
+
+    assert subscription_recorder.count_notifications() == 1
+
+    conn.close()
+
+def test_unpublish_from_different_client_same_user(server):
     domain_addr = server.random_domain().random_addr()
     conn0 = client.connect(domain_addr)
 
@@ -431,6 +637,31 @@ def test_unpublish_from_non_owner(server):
 
     delayed_close(conn0)
     delayed_close(conn1)
+
+def test_unpublish_from_different_user(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
+    conn = client.connect(domain_addr)
+    service_id = conn.service_id()
+    ta_id = conn.publish(service_id, 0, { "name": { "service-x" }}, 42)
+    conn.close()
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[1]
+    conn = client.connect(domain_addr)
+    unpublish_recorder = SingleResponseRecorder()
+    ta_id = conn.unpublish(service_id, unpublish_recorder)
+    unpublish_recorder.ta_id = ta_id
+    wait(conn, criteria = unpublish_recorder.failed)
+    conn.close()
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
+    conn = client.connect(domain_addr)
+    unpublish_recorder = SingleResponseRecorder()
+    ta_id = conn.unpublish(service_id, unpublish_recorder)
+    unpublish_recorder.ta_id = ta_id
+    wait(conn, criteria = unpublish_recorder.completed)
+    conn.close()
 
 def test_publish_and_unpublish_trigger_subscription(server):
     conn = client.connect(server.random_domain().random_addr())
@@ -667,61 +898,6 @@ def test_modify_existing_trigger_now_matching_subscription(server):
     ]
     conn.close()
 
-def test_republish_same_generation_doesnt_trigger_subscription(server):
-    conn = client.connect(server.random_domain().random_addr())
-
-    service_id = conn.service_id()
-    service_generation = 99
-    service_props = { "name": { "foo" } }
-    service_ttl = 42
-
-    conn.publish(service_id, service_generation, service_props, service_ttl)
-
-    subscription_recorder = MultiResponseRecorder()
-    ta_id = conn.subscribe(17, subscription_recorder)
-    subscription_recorder.ta_id = ta_id
-
-    wait(conn, criteria = subscription_recorder.accepted)
-    wait(conn, timeout = 0.1)
-
-    assert subscription_recorder.count_notifications() == 1
-
-    conn.publish(service_id, service_generation, service_props, service_ttl)
-    conn.publish(service_id, service_generation, {}, service_ttl)
-
-    wait(conn, timeout = 0.1)
-
-    assert subscription_recorder.count_notifications() == 1
-
-    conn.close()
-
-def test_republish_older_generation_doesnt_trigger_subscription(server):
-    conn = client.connect(server.random_domain().random_addr())
-
-    service_id = conn.service_id()
-    service_generations = [10, 11]
-    service_props = { "name": { "foo" } }
-    service_ttl = 42
-
-    conn.publish(service_id, service_generations[1], service_props, service_ttl)
-
-    subscription_recorder = MultiResponseRecorder()
-    ta_id = conn.subscribe(17, subscription_recorder)
-    subscription_recorder.ta_id = ta_id
-
-    wait(conn, criteria = subscription_recorder.accepted)
-    wait(conn, timeout = 0.1)
-
-    assert subscription_recorder.count_notifications() == 1
-
-    service_props = {}
-    conn.publish(service_id, service_generations[0],
-                 service_props, service_ttl)
-
-    assert subscription_recorder.count_notifications() == 1
-
-    conn.close()
-
 def test_unsubscribe(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -781,7 +957,7 @@ def test_unsubscribe_from_non_owner(server):
 
     wait(conn1, criteria = unsubscribe_recorder.failed)
     assert unsubscribe_recorder.get_fail_reason() == \
-        proto.FAIL_REASON_NOT_SUBSCRIPTION_OWNER
+        proto.FAIL_REASON_PERMISSION_DENIED
 
     delayed_close(conn0)
     delayed_close(conn1)
@@ -1053,9 +1229,9 @@ def test_survives_killed_clients(server):
 
     conn.close()
 
-def test_reconnecting_client_keeps_service_alive(server):
-    domain = server.random_domain()
-    conn_pub0 = client.connect(domain.default_addr())
+def run_client_reclaims_service(domain, reused_client_id = None):
+    conn_pub0 = client.connect(domain.default_addr(),
+                               client_id = reused_client_id)
 
     service_id = conn_pub0.service_id()
     service_generation = 10
@@ -1082,7 +1258,8 @@ def test_reconnecting_client_keeps_service_alive(server):
 
     assert subscription_recorder.count_notifications() == 2
 
-    conn_pub1 = client.connect(domain.default_addr())
+    conn_pub1 = client.connect(domain.default_addr(),
+                               client_id = reused_client_id)
 
     conn_pub1.publish(service_id, service_generation,
                       service_props, service_ttl)
@@ -1113,6 +1290,15 @@ def test_reconnecting_client_keeps_service_alive(server):
 
     conn_sub.close()
 
+def test_same_client_reclaims_service(server):
+    domain = server.random_domain()
+    client_id = client.allocate_client_id()
+    run_client_reclaims_service(domain, reused_client_id = client_id)
+
+def test_different_client_reclaims_service(server):
+    domain = server.random_domain()
+    run_client_reclaims_service(domain)
+
 MANY_ORPHANS = 100
 
 def test_many_orphans(server):
@@ -1134,6 +1320,36 @@ def test_many_orphans(server):
     assert len(conn.clients()) == 1
     conn.close()
 
+def test_orphan_race(server):
+    domain_addr = server.random_domain().default_addr()
+
+    # Connection must come through the same address (otherwise,
+    # different XCM transport may be used, and they might be
+    # considered different users).
+    conn0 = client.connect(domain_addr)
+    conn1 = client.connect(domain_addr)
+
+    service_id = 123123
+    service_generation = 100
+    service_props = {}
+    service_ttl = 1
+
+    conn0.publish(service_id, service_generation, service_props, service_ttl)
+    # To simulate that the server hasn't made conn0's services orphans
+    # yet, don't close the connection. This might happen with TCP/TLS,
+    # since TCP Keepalive made cause the client considered the
+    # connection lost, but the server does not yet agree.
+
+    conn1.publish(service_id, service_generation, service_props, service_ttl)
+
+    conn0.close()
+
+    wait(conn1, timeout = service_ttl + 0.25)
+
+    assert len(conn1.services()) == 1
+
+    conn1.close()
+
 def run_misbehaving_client(addr, junk_msg, skip_hello = True):
     valid_hello = {
         proto.FIELD_TA_CMD.name: proto.CMD_HELLO,
@@ -1147,7 +1363,6 @@ def run_misbehaving_client(addr, junk_msg, skip_hello = True):
         json.dumps(valid_hello).encode('utf-8'),
         junk_msg
     ]
-
     conn = xcm.connect(addr, 0)
     for msg in msgs:
         conn.send(msg)
@@ -1250,8 +1465,9 @@ def test_many_clients(server):
         # the server shouldn't be accepting any more connections
         last_conn = client.connect(domain.default_addr())
         ping_recorder = SingleResponseRecorder()
-        last_conn.ping(ping_recorder)
-        wait(last_conn, timeout = 0.5)
+        ping_ta = last_conn.ping(ping_recorder)
+        ping_recorder.ping_ta = ping_ta
+        wait(last_conn, timeout = 0.5, criteria = ping_recorder.completed)
         assert not ping_recorder.completed()
         last_conn.close()
     except client.Error:
@@ -1387,6 +1603,205 @@ def test_slow_client(server):
 
     slow_conn.close()
     fast_conn.close()
+
+class ConsumerResult(Enum):
+    CONNECT_FAILED = 0
+    RESOURCE_ALLOCATION_FAILED = 1
+    SUCCESS = 3
+
+class ResourceType(Enum):
+    CLIENT = 0
+    SERVICE = 1
+    SUBSCRIPTION = 2
+
+CONNECT_TIMEOUT = 0.25
+class ConsumerProcess(multiprocessing.Process):
+    def __init__(self, domain_addr, tls_cert, resource_type, resource_count,
+                 result_queue):
+        multiprocessing.Process.__init__(self)
+        self.domain_addr = domain_addr
+        self.tls_cert = tls_cert
+        self.resource_type = resource_type
+        self.resource_count = resource_count
+        self.result_queue = result_queue
+        self.stop = False
+        self.service_ids = []
+        self.conn = None
+    def handle_term(self, signo, stack):
+        self.stop = True
+    def connect(self):
+        try:
+            self.conn = client.connect(self.domain_addr)
+            wait(self.conn, self.conn.ready, CONNECT_TIMEOUT)
+            if not self.conn.ready():
+                self.conn.close()
+                self.conn = None
+                self.result_queue.put(ConsumerResult.CONNECT_FAILED)
+            else:
+                self.conn.ping()
+        except proto.Error:
+            if self.conn != None:
+                self.conn.close()
+                self.conn = None
+            self.result_queue.put(ConsumerResult.CONNECT_FAILED)
+    def allocate_resource(self):
+        try:
+            if self.resource_type == ResourceType.SERVICE:
+                for i in range(0, self.resource_count):
+                    service_id = self.conn.service_id()
+                    generation = 0
+                    service_props = { "name": { "service-%d" % service_id } }
+                    service_ttl = 1
+                    self.conn.publish(service_id, generation, service_props,
+                                      service_ttl)
+                    self.service_ids.append(service_id)
+                self.result_queue.put(ConsumerResult.SUCCESS)
+            elif self.resource_type == ResourceType.SUBSCRIPTION:
+                result = ConsumerResult.SUCCESS
+                for i in range(0, self.resource_count):
+                    sub_id = self.conn.subscription_id()
+                    recorder = MultiResponseRecorder()
+                    ta_id = self.conn.subscribe(sub_id, recorder)
+                    recorder.ta_id = ta_id
+                    wait(self.conn, criteria = \
+                         lambda: recorder.state != TransactionState.REQUESTING)
+                    if recorder.failed():
+                        result = ConsumerResult.RESOURCE_ALLOCATION_FAILED
+                self.result_queue.put(result)
+            elif self.resource_type == ResourceType.CLIENT:
+                assert self.resource_count == 1
+                self.result_queue.put(ConsumerResult.SUCCESS)
+        except client.Error:
+            self.result_queue.put(ConsumerResult.RESOURCE_ALLOCATION_FAILED)
+    def deallocate_resource(self):
+        for service_id in self.service_ids:
+            self.conn.unpublish(service_id)
+    def run(self):
+        if self.tls_cert != None:
+            os.environ['XCM_TLS_CERT'] = self.tls_cert
+        random.seed(time.time() + os.getpid())
+        signal.signal(signal.SIGTERM, self.handle_term)
+
+        self.connect()
+        if self.conn != None:
+            self.allocate_resource()
+            while not self.stop:
+                wait(self.conn, timeout = 0.1)
+            self.deallocate_resource()
+            self.conn.close()
+        sys.exit(0)
+
+def spawn_consumer(domain_addr, tls_cert, resource_type, max_attempts,
+                   result, result_queue):
+    if resource_type == ResourceType.CLIENT:
+        num = 1
+    else:
+        num = random.randint(1, max_attempts)
+
+    consumer = ConsumerProcess(domain_addr, tls_cert, resource_type, num,
+                               result_queue)
+    consumer.start()
+
+    assert result == result_queue.get()
+
+    return (consumer, num)
+
+def spawn_consumers(domain_addr, tls_cert, resource_type, limit,
+                    failure_result):
+    result_queue = multiprocessing.Queue()
+    consumers = []
+    attempts = 0
+    while attempts < limit:
+        left = limit - attempts
+        consumer, num = \
+            spawn_consumer(domain_addr, tls_cert, resource_type, left,
+                           ConsumerResult.SUCCESS, result_queue)
+        consumers.append(consumer)
+        attempts += num
+
+    consumer, num = \
+        spawn_consumer(domain_addr, tls_cert, resource_type, 1, failure_result,
+                       result_queue)
+    consumers.append(consumer)
+
+    return consumers
+
+def run_resource_limit(domain_addr, resource_type, user_limit, total_limit,
+                       failure_result):
+
+    consumers = []
+
+    # verify per-user limit
+    user0 = spawn_consumers(domain_addr, CLIENT_CERTS[1], resource_type,
+                            user_limit, failure_result)
+    consumers.extend(user0)
+
+    conn = client.connect(domain_addr)
+    if resource_type == ResourceType.CLIENT:
+        assert len(conn.clients()) == (user_limit + 1)
+    elif resource_type == ResourceType.SERVICE:
+        assert len(conn.services()) == user_limit
+    elif resource_type == ResourceType.SUBSCRIPTION:
+        assert len(conn.subscriptions()) == user_limit
+    conn.close()
+
+    total_left = total_limit - user_limit
+    # For simplicity, the resource limits for the pafd-under-test is
+    # configured so that two users may together exceed the total
+    # limit.
+    assert total_left < user_limit
+
+    # verify total limits
+    user1 = spawn_consumers(domain_addr, CLIENT_CERTS[2], resource_type,
+                            total_left, failure_result)
+    consumers.extend(user1)
+
+    for consumer in consumers:
+        consumer.terminate()
+        consumer.join()
+
+    conn = client.connect(domain_addr)
+    assert len(conn.clients()) == 1
+    conn.close()
+
+    # XXX: make sure user0's resources are free'd
+
+def test_max_clients(limited_clients_server):
+    domain_addr = limited_clients_server.default_domain().default_addr()
+    run_resource_limit(domain_addr, ResourceType.CLIENT, MAX_USER_CLIENTS,
+                       MAX_TOTAL_CLIENTS, ConsumerResult.CONNECT_FAILED)
+
+def test_max_services(limited_services_server):
+    domain_addr = limited_services_server.default_domain().default_addr()
+    run_resource_limit(domain_addr, ResourceType.SERVICE, MAX_USER_SERVICES,
+                       MAX_TOTAL_SERVICES,
+                       ConsumerResult.RESOURCE_ALLOCATION_FAILED)
+
+def test_max_subscriptions(limited_subscriptions_server):
+    domain_addr = limited_subscriptions_server.default_domain().default_addr()
+    run_resource_limit(domain_addr, ResourceType.SUBSCRIPTION,
+                       MAX_USER_SUBSCRIPTIONS, MAX_TOTAL_SUBSCRIPTIONS,
+                       ConsumerResult.RESOURCE_ALLOCATION_FAILED)
+
+def test_default_user_max_services(limited_services_server):
+    # use UX to get classified as default user
+    domain_ux_addr = limited_services_server.domains[1].default_addr()
+    consumers = \
+        spawn_consumers(domain_ux_addr, None, ResourceType.SERVICE,
+                        MAX_USER_SERVICES,
+                        ConsumerResult.RESOURCE_ALLOCATION_FAILED)
+
+    # should also be default user -> no resources available
+    conn = client.connect(domain_ux_addr)
+    with pytest.raises(client.Error, match=".*resources.*"):
+        conn.publish(conn.service_id(), 0, {}, 1)
+
+    for consumer in consumers:
+        consumer.terminate()
+        consumer.join()
+
+    conn.publish(conn.service_id(), 0, {}, 1)
+    conn.close()
 
 def test_unsupported_protocol_version(server):
     conn = xcm.connect(server.random_domain().random_addr(), 0)

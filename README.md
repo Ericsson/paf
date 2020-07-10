@@ -86,6 +86,9 @@ support will be dropped. Beyond the standard modules such as 'json'
 and 'logging', it also requires the 'enum' module, which is not
 standard for Python 2.
 
+In case a server configuration file is used, and also for running the
+test cases, the Python 'yaml' module is needed.
+
 In addition, the Pathfinder server depends on the Extensible
 Connection-oriented Messaging (XCM) library, in the form of libxcm.so.
 

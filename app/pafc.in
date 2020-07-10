@@ -220,7 +220,7 @@ class Worker(Thread):
         if printer.accepted:
             self._ok()
         else:
-            self._fail(printer.reason)
+            self._fail(printer.fail_reason)
     def cmd_subscribe(self, filter):
         self.dispatch_fun(lambda: self._cmd_subscribe(filter))
     def _cmd_unsubscribe(self, sub_id):
@@ -261,7 +261,7 @@ class Worker(Thread):
         print("OK.")
     def _fail(self, reason):
         if reason != None:
-            print(reason)
+            print("Operation failed: %s." % reason.replace("-", " "))
         else:
             print("Operation failed for unknown reasons.")
 

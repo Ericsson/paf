@@ -126,12 +126,15 @@ MATCH_TYPE_MODIFIED = 'modified'
 MATCH_TYPE_DISAPPEARED = 'disappeared'
 
 FAIL_REASON_NO_HELLO = 'no-hello'
+FAIL_REASON_CLIENT_ID_EXISTS = 'client-id-exists'
 FAIL_REASON_INVALID_FILTER_SYNTAX = 'invalid-filter-syntax'
 FAIL_REASON_SUBSCRIPTION_ID_EXISTS = 'subscription-id-exists'
 FAIL_REASON_NON_EXISTENT_SUBSCRIPTION_ID = 'non-existent-subscription-id'
 FAIL_REASON_NON_EXISTENT_SERVICE_ID = 'non-existent-service-id'
 FAIL_REASON_UNSUPPORTED_PROTOCOL_VERSION = 'unsupported-protocol-version'
-FAIL_REASON_NOT_SUBSCRIPTION_OWNER = 'not-subscription-owner'
+FAIL_REASON_PERMISSION_DENIED = 'permission-denied'
+FAIL_REASON_OLD_GENERATION = 'old-generation'
+FAIL_REASON_INSUFFICIENT_RESOURCES = 'insufficient-resources'
 
 class InteractionType(Enum):
     SINGLE_RESPONSE = 0
@@ -225,7 +228,8 @@ TA_UNPUBLISH = TransactionType(
 
 TA_PING = TransactionType(
     CMD_PING,
-    InteractionType.SINGLE_RESPONSE
+    InteractionType.SINGLE_RESPONSE,
+    opt_fail_fields = [FIELD_FAIL_REASON]
 )
 
 TA_CLIENTS = TransactionType(
