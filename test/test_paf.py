@@ -1100,9 +1100,23 @@ def test_many_orphans(server):
     assert len(conn.clients()) == 1
     conn.close()
 
-def run_misbehaving_client(addr, junk_msg):
+def run_misbehaving_client(addr, junk_msg, skip_hello = True):
+    valid_hello = {
+        proto.FIELD_TA_CMD.name: proto.CMD_HELLO,
+        proto.FIELD_TA_ID.name: 20,
+        proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
+        proto.FIELD_CLIENT_ID.name: client.allocate_client_id(),
+        proto.FIELD_PROTO_MIN_VERSION.name: 0,
+        proto.FIELD_PROTO_MAX_VERSION.name: 99999
+    }
+    msgs = [
+        json.dumps(valid_hello).encode('utf-8'),
+        junk_msg
+    ]
+
     conn = xcm.connect(addr, 0)
-    conn.send(junk_msg)
+    for msg in msgs:
+        conn.send(msg)
     while True:
         msg = conn.receive()
         if len(msg) == 0:
@@ -1163,7 +1177,10 @@ def test_misbehaving_clients(server):
         proto.FIELD_TA_CMD.name: proto.CMD_PUBLISH,
         proto.FIELD_TA_ID.name: 42,
         proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
-        proto.FIELD_SERVICE_PROPS.name: { "name": "not-a-list" }
+        proto.FIELD_SERVICE_ID.name: 123,
+        proto.FIELD_GENERATION.name: 0,
+        proto.FIELD_SERVICE_PROPS.name: { "name": "not-a-list" },
+        proto.FIELD_TTL.name: 5
     }
     run_misbehaving_client(domain_addr,
                            json.dumps(prop_value_not_list).encode('utf-8'))
