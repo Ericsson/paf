@@ -117,6 +117,8 @@ try:
 
     event_loop.run()
 
+    event_loop.close()
+
     logger.info("Exiting.")
     for server in servers:
         server.terminate()

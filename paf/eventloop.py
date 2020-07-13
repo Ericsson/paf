@@ -92,6 +92,8 @@ class EventLoop:
         self.fd_source = {}
         self._stop = False
         self.epoll = select.epoll()
+        self.s_rfd = None
+        self.s_wfd = None
         self.init_signal_wakeup_fd()
     def init_signal_wakeup_fd(self):
         for signo in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
@@ -233,3 +235,13 @@ class EventLoop:
                     raise
     def stop(self):
         self._stop = True
+    def close(self):
+        if self.s_rfd != None:
+            os.close(self.s_rfd)
+            self.s_rfd = None
+        if self.s_wfd != None:
+            signal.set_wakeup_fd(-1)
+            os.close(self.s_wfd)
+            self.s_wfd = None
+    def __del__(self):
+        self.close()
