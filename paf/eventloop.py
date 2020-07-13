@@ -205,21 +205,26 @@ class EventLoop:
                 handler()
     def run(self):
         self._stop = False
-        while not self._stop:
+        while True:
             try:
                 self.fire_actives()
+                if self._stop:
+                    break
 
                 timeout = self.next_relative_timeout()
 
                 if timeout == 0:
                     self.fire_timeouts()
+                    if self._stop:
+                        break
                 else:
                     fds = self.epoll.poll(timeout=timeout)
                     if len(fds) > 0:
                         self.handle_fds(fds)
                     else:
                         self.fire_timeouts()
-
+                    if self._stop:
+                        break
             except IOError as e:
                 if e.errno == errno.EINTR:
                     # Python 2 generates an exception on signals (since EINTR)
