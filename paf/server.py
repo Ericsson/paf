@@ -461,7 +461,6 @@ class Server:
         self.orphan_timer = eventloop.Source()
         self.event_loop.add(self.orphan_timer, self.timer_activate)
         self.connections = []
-        self.next_id = 0
     def max_clients_reached(self):
         max_clients = self.sd.max_total_clients()
         reached = max_clients != None and len(self.connections) == max_clients

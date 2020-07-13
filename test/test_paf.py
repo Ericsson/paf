@@ -404,11 +404,13 @@ class MultiResponseRecorder(ResponseRecorderBase):
     def get_accept(self):
         return self.get_replies(client.EventType.ACCEPT)[0]
 
+@pytest.mark.fast
 def test_hello(server):
     conn = client.connect(server.random_domain().random_addr())
     proto_version = conn.hello()[0]
     assert proto_version == proto.VERSION
 
+@pytest.mark.fast
 def test_invalid_client_id_reuse(server):
     client_id = client.allocate_client_id()
     conn0 = client.connect(server.default_domain().random_addr(),
@@ -425,6 +427,7 @@ def test_invalid_client_id_reuse(server):
     conn0.close()
 
 NUM_SERVICES = 1000
+@pytest.mark.fast
 def test_batch_publish(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -525,28 +528,33 @@ def run_republish_orphan(domain_addr, new_generation = True,
     conn_pub1.close()
     conn_sub.close()
 
+@pytest.mark.fast
 def test_republish_new_generation_orphan_from_same_client_id(server):
     domain_addr = server.random_domain().random_addr()
     client_id = client.allocate_client_id()
     run_republish_orphan(domain_addr, new_generation = True,
                          reused_client_id = client_id)
 
+@pytest.mark.fast
 def test_republish_same_generation_orphan_from_same_client(server):
     domain_addr = server.random_domain().random_addr()
     client_id = client.allocate_client_id()
     run_republish_orphan(domain_addr, new_generation = False,
                          reused_client_id = client_id)
 
+@pytest.mark.fast
 def test_republish_new_generation_orphan_from_different_client(server):
     domain_addr = server.random_domain().random_addr()
     client_id = client.allocate_client_id()
     run_republish_orphan(domain_addr, new_generation = True)
 
+@pytest.mark.fast
 def test_republish_same_generation_orphan_from_different_client(server):
     domain_addr = server.random_domain().random_addr()
     client_id = client.allocate_client_id()
     run_republish_orphan(domain_addr, new_generation = False)
 
+@pytest.mark.fast
 def test_unpublish_nonexisting_service(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -557,6 +565,7 @@ def test_unpublish_nonexisting_service(server):
 
     delayed_close(conn)
 
+@pytest.mark.fast
 def test_republish_same_generation_non_orphan_same_connection(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -587,6 +596,7 @@ def test_republish_same_generation_non_orphan_same_connection(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_republish_same_and_older_generation(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -620,6 +630,7 @@ def test_republish_same_and_older_generation(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_unpublish_from_different_client_same_user(server):
     domain_addr = server.random_domain().random_addr()
     conn0 = client.connect(domain_addr)
@@ -638,6 +649,7 @@ def test_unpublish_from_different_client_same_user(server):
     delayed_close(conn0)
     delayed_close(conn1)
 
+@pytest.mark.fast
 def test_unpublish_from_different_user(tls_server):
     domain_addr = tls_server.default_domain().default_addr()
 
@@ -663,6 +675,7 @@ def test_unpublish_from_different_user(tls_server):
     wait(conn, criteria = unpublish_recorder.completed)
     conn.close()
 
+@pytest.mark.fast
 def test_publish_and_unpublish_trigger_subscription(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -724,6 +737,7 @@ def test_publish_and_unpublish_trigger_subscription(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_ttl_change_trigger_subscription(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -760,6 +774,7 @@ def test_ttl_change_trigger_subscription(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_subscribe_to_existing_service(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -796,6 +811,7 @@ def test_subscribe_to_existing_service(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_subscription_id_errornous_reuse(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -817,6 +833,7 @@ def test_subscription_id_errornous_reuse(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_subscription_id_valid_reuse(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -843,6 +860,7 @@ def test_subscription_id_valid_reuse(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_subscribe_invalid_syntax_filter(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -858,6 +876,7 @@ def test_subscribe_invalid_syntax_filter(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_modify_existing_trigger_now_matching_subscription(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -898,6 +917,7 @@ def test_modify_existing_trigger_now_matching_subscription(server):
     ]
     conn.close()
 
+@pytest.mark.fast
 def test_unsubscribe(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -918,6 +938,7 @@ def test_unsubscribe(server):
 
     delayed_close(conn)
 
+@pytest.mark.fast
 def test_unsubscribe_nonexisting(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -936,6 +957,7 @@ def test_unsubscribe_nonexisting(server):
 
     delayed_close(conn)
 
+@pytest.mark.fast
 def test_unsubscribe_from_non_owner(server):
     domain = server.random_domain()
     conn0 = client.connect(domain.default_addr())
@@ -966,6 +988,7 @@ def by_id(l):
     return l[0]
 
 NUM_CLIENTS = 10
+@pytest.mark.fast
 def test_list_subscriptions(server):
     conns = []
     subscriptions = []
@@ -994,6 +1017,7 @@ def test_list_subscriptions(server):
     for conn in conns:
         conn.close()
 
+@pytest.mark.fast
 def test_list_services(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -1021,6 +1045,7 @@ def test_list_services(server):
 
     assert len(conn.services(filter="(key_int>0)")) == (NUM_SERVICES - 1)
 
+@pytest.mark.fast
 def test_list_orphan(server):
     domain = server.random_domain()
     pub_conn = client.connect(domain.default_addr())
@@ -1043,6 +1068,7 @@ def test_list_orphan(server):
     orphan_since = services[0][5]['orphan_since']
     assert orphan_since <= time.time()
 
+@pytest.mark.fast
 def test_list_services_with_invalid_filter(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -1057,6 +1083,7 @@ def test_list_services_with_invalid_filter(server):
 
     conn.close()
 
+@pytest.mark.fast
 def test_disconnected_client_orphans_service(server):
     domain = server.random_domain()
     conn_sub = client.connect(domain.default_addr())
@@ -1125,6 +1152,7 @@ def crashing_client(domain_addr, service_ttl):
     conn.publish(conn.service_id(), 0, {}, service_ttl)
     conn.publish(conn.service_id(), 0, {}, service_ttl)
 
+@pytest.mark.fast
 def test_survives_connection_reset(server):
     domain_addr = server.random_domain().random_addr()
     service_ttl = 1
@@ -1140,6 +1168,7 @@ def test_survives_connection_reset(server):
     conn.ping()
     conn.close()
 
+@pytest.mark.fast
 def test_survives_connection_reset(server):
     domain_addr = server.random_domain().random_addr()
     service_ttl = 1
@@ -1197,6 +1226,7 @@ class ClientProcess(multiprocessing.Process):
 
         sys.exit(0)
 
+@pytest.mark.fast
 def test_survives_killed_clients(server):
     domain_addr = server.random_domain().random_addr()
 
@@ -1290,17 +1320,20 @@ def run_client_reclaims_service(domain, reused_client_id = None):
 
     conn_sub.close()
 
+@pytest.mark.fast
 def test_same_client_reclaims_service(server):
     domain = server.random_domain()
     client_id = client.allocate_client_id()
     run_client_reclaims_service(domain, reused_client_id = client_id)
 
+@pytest.mark.fast
 def test_different_client_reclaims_service(server):
     domain = server.random_domain()
     run_client_reclaims_service(domain)
 
 MANY_ORPHANS = 100
 
+@pytest.mark.fast
 def test_many_orphans(server):
     domain = server.random_domain()
 
@@ -1320,6 +1353,7 @@ def test_many_orphans(server):
     assert len(conn.clients()) == 1
     conn.close()
 
+@pytest.mark.fast
 def test_orphan_race(server):
     domain_addr = server.random_domain().default_addr()
 
@@ -1372,6 +1406,7 @@ def run_misbehaving_client(addr, junk_msg, skip_hello = True):
             conn.close()
             break
 
+@pytest.mark.fast
 def test_misbehaving_clients(server):
     domain_addr = server.random_domain().random_addr()
     conn = client.connect(domain_addr)
@@ -1440,6 +1475,7 @@ def test_misbehaving_clients(server):
 
     delayed_close(conn)
 
+@pytest.mark.fast
 def test_many_clients(server):
     domain = server.random_domain()
     conns = []
@@ -1477,6 +1513,7 @@ def test_many_clients(server):
         conn.close()
 
 FEW_CLIENTS = 4
+@pytest.mark.fast
 def test_list_clients(server):
     domain = server.random_domain()
     conn = client.connect(domain.default_addr())
@@ -1499,6 +1536,7 @@ def test_list_clients(server):
         other_conn.close()
     conn.close()
 
+@pytest.mark.fast
 def test_multiple_domains(md_server):
     conns = []
     for domain in md_server.domains:
@@ -1513,6 +1551,7 @@ def test_multiple_domains(md_server):
     for conn in conns:
         conn.close()
 
+@pytest.mark.fast
 def test_multiple_sockets_per_domain(ms_server):
     domain = ms_server.random_domain()
     assert len(domain.addrs) > 0
@@ -1530,6 +1569,7 @@ def test_multiple_sockets_per_domain(ms_server):
     for conn in conns:
         conn.close()
 
+@pytest.mark.fast
 def test_connect_by_domain_name(server):
     for domain in server.domains:
         conn_by_name = client.connect(domain.name)
@@ -1544,6 +1584,7 @@ def test_connect_by_domain_name(server):
         conn_by_addr.close()
 
 MANY_REQUESTS=10000
+@pytest.mark.fast
 def test_many_requests(server):
     conn = client.connect(server.random_domain().random_addr())
 
@@ -1569,6 +1610,7 @@ def assure_ping(conn, max_latency):
 
 NUM_SLOW_CONN_REQS = 50
 ACCEPTABLE_LATENCY = 0.5
+@pytest.mark.fast
 def test_slow_client(server):
     domain_addr = server.random_domain().random_addr()
     slow_conn = client.connect(domain_addr)
@@ -1685,8 +1727,7 @@ class ConsumerProcess(multiprocessing.Process):
         self.connect()
         if self.conn != None:
             self.allocate_resource()
-            while not self.stop:
-                wait(self.conn, timeout = 0.1)
+            wait(self.conn, criteria = lambda: self.stop)
             self.deallocate_resource()
             self.conn.close()
         sys.exit(0)
@@ -1766,23 +1807,27 @@ def run_resource_limit(domain_addr, resource_type, user_limit, total_limit,
 
     # XXX: make sure user0's resources are free'd
 
+@pytest.mark.fast
 def test_max_clients(limited_clients_server):
     domain_addr = limited_clients_server.default_domain().default_addr()
     run_resource_limit(domain_addr, ResourceType.CLIENT, MAX_USER_CLIENTS,
                        MAX_TOTAL_CLIENTS, ConsumerResult.CONNECT_FAILED)
 
+@pytest.mark.fast
 def test_max_services(limited_services_server):
     domain_addr = limited_services_server.default_domain().default_addr()
     run_resource_limit(domain_addr, ResourceType.SERVICE, MAX_USER_SERVICES,
                        MAX_TOTAL_SERVICES,
                        ConsumerResult.RESOURCE_ALLOCATION_FAILED)
 
+@pytest.mark.fast
 def test_max_subscriptions(limited_subscriptions_server):
     domain_addr = limited_subscriptions_server.default_domain().default_addr()
     run_resource_limit(domain_addr, ResourceType.SUBSCRIPTION,
                        MAX_USER_SUBSCRIPTIONS, MAX_TOTAL_SUBSCRIPTIONS,
                        ConsumerResult.RESOURCE_ALLOCATION_FAILED)
 
+@pytest.mark.fast
 def test_default_user_max_services(limited_services_server):
     # use UX to get classified as default user
     domain_ux_addr = limited_services_server.domains[1].default_addr()
@@ -1803,6 +1848,7 @@ def test_default_user_max_services(limited_services_server):
     conn.publish(conn.service_id(), 0, {}, 1)
     conn.close()
 
+@pytest.mark.fast
 def test_unsupported_protocol_version(server):
     conn = xcm.connect(server.random_domain().random_addr(), 0)
     hello = {
@@ -1914,6 +1960,7 @@ def xcm_has_uxf():
     except xcm.error:
         return False
 
+@pytest.mark.fast
 def test_handle_signals():
     if not xcm_has_uxf():
         return

@@ -27,7 +27,7 @@ check: cert
 	export PYTHONPATH=$(PWD):$$PYTHONPATH && \
 	export PATH=$(PWD)/app:$$PATH && \
 	cd test && \
-	$(PYTEST) -vv -s $(TESTS)
+	$(PYTEST) -vv $(TESTOPTS) -s $(TESTS)
 
 test/cert/ca/ca-cert.pem: test/cert/cert.conf
 	mkdir -p test/cert/ca
