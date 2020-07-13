@@ -50,7 +50,7 @@ def random_ux_addr():
     return "ux:%s" % random_name()
 
 def random_port():
-    return random.randint(33000, 60000)
+    return random.randint(2000, 32000)
 
 def random_tcp_addr():
     return "tcp:127.0.0.1:%d" % random_port()
