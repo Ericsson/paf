@@ -4,6 +4,7 @@
 
 import pytest
 import os
+import fcntl
 import errno
 import logging
 import sys
@@ -175,28 +176,48 @@ def ms_server():
     yield server
     server.stop()
 
+def set_nonblocking(fd):
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
 def wait(conn, criteria = lambda: False, timeout = None):
-    if timeout != None:
-        deadline = time.time() + timeout
-    while not criteria():
+    rfd = None
+    wfd = None
+    old_wakeup_fd = None
+    try:
+        rfd, wfd = os.pipe()
+        set_nonblocking(rfd)
+        set_nonblocking(wfd)
+        old_wakeup_fd = signal.set_wakeup_fd(wfd)
         if timeout != None:
-            time_left = deadline - time.time()
-            if time_left <= 0:
-                break
-        else:
-            time_left = None
+            deadline = time.time() + timeout
+        while not criteria():
+            if timeout != None:
+                time_left = deadline - time.time()
+                if time_left <= 0:
+                    break
+            else:
+                time_left = None
 
-        client_fds, client_events = conn.want()
-        if len(client_fds) > 0:
-            poll = select.poll()
-            client.populate(poll, client_fds, client_events)
-            try: # only needed in Python 2
-                poll.poll(time_left)
-            except select.error as e:
-                if e.args[0] != errno.EINTR:
-                    raise e
+            client_fds, client_events = conn.want()
+            if len(client_fds) > 0:
+                poll = select.poll()
+                client.populate(poll, client_fds, client_events)
+                poll.register(rfd, select.EPOLLIN)
+                try: # only needed in Python 2
+                    poll.poll(time_left)
+                except select.error as e:
+                    if e.args[0] != errno.EINTR:
+                        raise e
 
-        conn.process()
+            conn.process()
+    finally:
+        if rfd != None:
+            os.close(rfd)
+        if wfd != None:
+            os.close(wfd)
+        if old_wakeup_fd != None:
+            signal.set_wakeup_fd(-1)
 
 def delayed_close(conn):
     # always wait a little, to allow trailing messages to arrive, which
