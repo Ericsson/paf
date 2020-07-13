@@ -152,7 +152,7 @@ def random_server(min_domains, max_domains, min_addrs_per_domain,
     server = Server()
     num_domains = random.randint(min_domains, max_domains)
     for i in range(0, num_domains):
-        num_addrs = random.randint(min_domains, max_domains)
+        num_addrs = random.randint(min_addrs_per_domain, max_addrs_per_domain)
         server.configure_random_domain(num_addrs)
     server.start()
     return server
