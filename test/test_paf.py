@@ -138,14 +138,14 @@ class Server:
 
         pafd_env = os.environ.copy()
         pafd_env['XCM_TLS_CERT'] = SERVER_CERT
-        self.server_process = subprocess.Popen(cmd, env = pafd_env)
+        self.process = subprocess.Popen(cmd, env = pafd_env)
 
         time.sleep(0.25)
     def stop(self, signo = signal.SIGTERM):
-        if self.server_process == None:
+        if self.process == None:
             return
-        self.server_process.send_signal(signo)
-        self.server_process = None
+        self.process.send_signal(signo)
+        self.process = None
         time.sleep(0.1)
 
 def random_server(min_domains, max_domains, min_addrs_per_domain,
@@ -175,6 +175,13 @@ def ms_server():
     server = random_server(1, 4, 16, 32)
     yield server
     server.stop()
+
+@pytest.yield_fixture(scope='function')
+def tls_server():
+    server = Server()
+    server.configure_domain(random_name(), random_tls_addr())
+    server.start()
+    return server
 
 def set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -972,11 +979,15 @@ def test_survives_connection_reset(server):
     conn.ping()
     conn.close()
 
+CLIENT_PROCESS_TTL = 1
 class ClientProcess(multiprocessing.Process):
-    def __init__(self, domain_addr, ready_queue):
+    def __init__(self, domain_addr, ready_queue, unpublish = True,
+                 unsubscribe = True):
         multiprocessing.Process.__init__(self)
         self.domain_addr = domain_addr
         self.ready_queue = ready_queue
+        self.unpublish = unpublish
+        self.unsubscribe = unsubscribe
         self.stop = False
     def handle_term(self, signo, stack):
         self.stop = True
@@ -994,7 +1005,7 @@ class ClientProcess(multiprocessing.Process):
         service_id = conn.service_id()
         generation = 0
         service_props = { "name": { "service-%d" % service_id } }
-        service_ttl = 1
+        service_ttl = CLIENT_PROCESS_TTL
         conn.publish(service_id, generation, service_props, service_ttl)
 
         sub_id = conn.subscription_id()
@@ -1003,10 +1014,12 @@ class ClientProcess(multiprocessing.Process):
         self.ready_queue.put(True)
         wait(conn, criteria = lambda: self.stop)
 
-        conn.unpublish(service_id)
-        conn.unsubscribe(sub_id)
+        if self.unpublish:
+            conn.unpublish(service_id)
+        if self.unsubscribe:
+            conn.unsubscribe(sub_id)
 
-        sys.exit(1)
+        sys.exit(0)
 
 def test_survives_killed_clients(server):
     domain_addr = server.random_domain().random_addr()
@@ -1397,6 +1410,86 @@ def test_unsupported_protocol_version(server):
     actual_response = json.loads(in_msg.decode('utf-8'))
     assert actual_response == expected_response
     conn.close()
+
+def run_leak_clients(domain_addr, num):
+    ready_queue = multiprocessing.Queue()
+    processes = []
+    for i in range(0, num):
+        unpublish = bool(random.getrandbits(1))
+        unsubscribe = bool(random.getrandbits(1))
+        p = ClientProcess(domain_addr, ready_queue, unpublish = unpublish,
+                          unsubscribe = unsubscribe)
+        p.start()
+        processes.append(p)
+    for p in processes:
+        ready_queue.get()
+    for p in processes:
+        p.terminate()
+    for p in processes:
+        p.join()
+
+def get_rss(pid):
+    with open("/proc/%d/status" % pid) as f:
+        for line in f:
+            e = line.split(":")
+            if len(e) == 2 and e[0] == 'VmRSS':
+                return int(e[1].replace(" kB", ""))
+
+def exercise_server(domain_addr):
+    # Connect on XCM-level only
+    for i in range(0, 250):
+        while True:
+            try:
+                conn = xcm.connect(domain_addr, 0)
+                conn.send("foo")
+                conn.close()
+                break;
+            except xcm.error:
+                pass
+
+    # Connect on Pathfinder protocol level
+    for i in range(0, 250):
+        while True:
+            try:
+                conn = client.connect(domain_addr)
+                conn.ping()
+                conn.close()
+                break;
+            except proto.TransportError:
+                pass
+
+    # Spawn off many clients concurrently subscribing and publishing
+    for i in range(0, 100):
+        run_leak_clients(domain_addr, 5)
+
+    conn = client.connect(domain_addr)
+    time.sleep(CLIENT_PROCESS_TTL)
+    while len(conn.services()) > 0:
+        time.sleep(0.1)
+    conn.close()
+
+ALLOWED_RETRIES = 3
+def test_server_leak(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+
+    # warm up
+    exercise_server(domain_addr)
+    rss = get_rss(tls_server.process.pid)
+
+    # This test case attempts to detect memory leaks by looking for
+    # continuously growing server process resident set size
+    # (RSS). This method must include a bit of heuristics, since
+    # there's nondeterminism in terms of things like Python GC and
+    # heap fragmentation. Thus, we allow RSS to "sometimes" grow.
+
+    for i in range(0, ALLOWED_RETRIES + 1):
+        initial_rss = rss
+        exercise_server(domain_addr)
+        rss = get_rss(tls_server.process.pid)
+        if rss == initial_rss:
+            break
+
+    assert rss == initial_rss
 
 def xcm_has_uxf():
     try:
