@@ -1920,7 +1920,7 @@ def exercise_server(domain_addr):
                 pass
 
     # Spawn off many clients concurrently subscribing and publishing
-    for i in range(0, 100):
+    for i in range(0, 50):
         run_leak_clients(domain_addr, 5)
 
     conn = client.connect(domain_addr)
@@ -1929,7 +1929,7 @@ def exercise_server(domain_addr):
         time.sleep(0.1)
     conn.close()
 
-ALLOWED_RETRIES = 3
+ALLOWED_RETRIES = 4
 def test_server_leak(tls_server):
     domain_addr = tls_server.default_domain().default_addr()
 
@@ -1947,10 +1947,10 @@ def test_server_leak(tls_server):
         initial_rss = rss
         exercise_server(domain_addr)
         rss = get_rss(tls_server.process.pid)
-        if rss == initial_rss:
+        if rss <= initial_rss:
             break
 
-    assert rss == initial_rss
+    assert rss <= initial_rss
 
 def xcm_has_uxf():
     try:
