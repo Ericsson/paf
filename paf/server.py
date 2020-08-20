@@ -443,6 +443,9 @@ class Connection:
         self.conn_source = None
         self.term_cb(self)
 
+PURGE_INTERVAL = 1
+MAX_HANDSHAKE_TIME = 2
+
 class Server:
     def __init__(self, server_addrs, max_user_resources, max_total_resources,
                  event_loop):
@@ -459,39 +462,71 @@ class Server:
         for source in self.server_socks.keys():
             self.event_loop.add(source, self.sock_activate)
         self.orphan_timer = eventloop.Source()
-        self.event_loop.add(self.orphan_timer, self.timer_activate)
+        self.event_loop.add(self.orphan_timer, self.orphan_timer_activate)
+        self.purge_timer = eventloop.Source()
+        self.event_loop.add(self.purge_timer, self.purge_timer_activate)
         self.connections = []
-    def max_clients_reached(self):
+    def client_capacity_left(self):
         max_clients = self.sd.max_total_clients()
-        reached = max_clients != None and len(self.connections) == max_clients
-        return reached
+        if max_clients == None:
+            return None
+        return max_clients - len(self.connections)
+    def max_clients_reached(self):
+        left = self.client_capacity_left()
+        if left == None:
+            return False
+        return left == 0
+    def schedule_purge(self):
+        if len(self.connections) > len(self.sd.clients):
+            self.purge_timer.set_timeout(time.time() + PURGE_INTERVAL)
+    def purge_connection(self, conn, handshake_time):
+        logger.debug("Dropping connection from %s since it failed to "
+                     "finish the protocol handshake within %.1f s.",
+                     conn.conn_addr, MAX_HANDSHAKE_TIME)
+        conn.terminate()
+    def purge_connections(self):
+        num_in_progress = len(self.connections) - len(self.sd.clients)
+        if num_in_progress > 0:
+            logger.debug("Scanning for idle connections. %d connection(s) has "
+                         "not completed the protocol hand shake.",
+                         num_in_progress)
+            now = time.time()
+            failed = []
+            for conn in self.connections:
+                if conn.client_id == None or \
+                   not self.sd.has_client(conn.client_id):
+                    handshake_time = now - conn.connect_time
+                    if handshake_time > MAX_HANDSHAKE_TIME:
+                        failed.append((conn, handshake_time))
+            for conn, handshake_time in failed:
+                self.purge_connection(conn, handshake_time)
+    def purge_timer_activate(self):
+        self.purge_timer.clear_timeout()
+        self.purge_connections()
+        self.schedule_purge()
     def sock_activate(self):
         for source, sock in self.server_socks.items():
             if self.max_clients_reached():
                 sock.finish()
                 source.update(0)
             else:
-                max_clients = self.sd.max_total_clients()
-                if max_clients != None:
-                    # At most one client per connection, so this is an
-                    # conservative estimate (as some connections may
-                    # not yet be considered clients).
-                    left = max_clients - len(self.connections)
-                else:
-                    left = MAX_ACCEPT_BATCH
-                for i in range(0, min(MAX_ACCEPT_BATCH, left)):
+                batch_size = self.client_capacity_left()
+                if batch_size == None or batch_size > MAX_ACCEPT_BATCH:
+                    batch_size = MAX_ACCEPT_BATCH
+                for i in range(0, batch_size):
                     try:
                         conn_sock = sock.accept()
                         self.update_source(source)
                         conn = Connection(self.sd, conn_sock, self.event_loop,
                                           self, self.conn_terminated)
                         self.connections.append(conn)
+                        self.schedule_purge()
                     except xcm.error as e:
                         self.update_source(source)
                         if e.errno != errno.EAGAIN:
                             logger.debug("Error accepting client: %s" % e)
                         break;
-    def timer_activate(self):
+    def orphan_timer_activate(self):
         timed_out = self.sd.purge_orphans()
         for orphan_id in timed_out:
             logger.debug("Timed out orphan service %x." % orphan_id)
@@ -511,8 +546,8 @@ class Server:
         for sock in self.server_socks.values():
             sock.close()
     def terminate(self):
-        for conn in self.connections:
-            conn.terminate()
+        while len(self.connections) > 0:
+            self.connections[0].terminate()
         for stream in self.server_socks.keys():
             self.event_loop.remove(stream)
         self.close_server_socks()

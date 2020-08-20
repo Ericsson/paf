@@ -1849,6 +1849,27 @@ def test_default_user_max_services(limited_services_server):
     conn.close()
 
 @pytest.mark.fast
+def test_tcp_dos(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+
+    conns = []
+    while len(conns) < MAX_CLIENTS:
+        try:
+            conn = xcm.connect(domain_addr, 0)
+            conns.append(conn)
+        except xcm.error:
+            time.sleep(0.1)
+
+    time.sleep(3)
+
+    conn = client.connect(domain_addr)
+    conn.ping()
+    conn.close()
+
+    for conn in conns:
+        conn.close()
+
+@pytest.mark.fast
 def test_unsupported_protocol_version(server):
     conn = xcm.connect(server.random_domain().random_addr(), 0)
     hello = {
