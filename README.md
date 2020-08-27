@@ -100,6 +100,15 @@ Pathfinder build system uses autotools.
 To install, run:
 autoreconf -i && ./configure && make install
 
+Automake tends to install the 'paf' Python module in the
+'site-packages', rather than the 'dist-packages' directory.
+Debian-based Linux distributions do not include 'site-packages' in the
+Python module search path (i.e. sys.path). In that case, or in case a
+non-standard (i.e non /usr/local or /usr) prefix is used, the
+PYTHONPATH environment variable needs to point to 'site-packages' in
+the installation directory tree, in order for the Pathfinder
+applications to find the 'paf' module.
+
 ## Server
 
 One or more Pathfinder server (daemon) processes are run for each
