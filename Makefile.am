@@ -2,7 +2,7 @@ bin_SCRIPTS = app/pafd app/pafc app/pafbench
 
 pkgpython_PYTHON = paf/__init__.py paf/client.py paf/filter.py paf/props.py \
 	paf/sd.py paf/xcm.py paf/eventloop.py paf/proto.py paf/server.py \
-	paf/compat.py
+	paf/compat.py paf/conf.py
 
 UMLSRC=doc/pub_client_long_disconnect.plantuml \
 	doc/pub_client_short_disconnect.plantuml \
