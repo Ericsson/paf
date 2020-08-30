@@ -110,7 +110,8 @@ MAX_ACCEPT_BATCH = 16
 SOFT_OUT_WIRE_LIMIT = 128
 
 class Connection:
-    def __init__(self, sd, conn_sock, event_loop, server, term_cb):
+    def __init__(self, sd, conn_sock, event_loop, server, handshake_cb,
+                 term_cb):
         self.client_id = None
         self.conn_addr = conn_sock.get_attr("xcm.remote_addr")
         self.sd = sd
@@ -119,6 +120,7 @@ class Connection:
         self.out_wire_msgs = deque()
         self.event_loop = event_loop
         self.server = server
+        self.handshake_cb = handshake_cb
         self.term_cb = term_cb
         self.update_source()
         self.event_loop.add(self.conn_source, self.activate)
@@ -243,6 +245,7 @@ class Connection:
                 self.sd.client_connect(self.client_id, user_id)
                 self.debug("Handshake producedure finished.")
                 self.handshaked = True
+                self.handshake_cb(self)
                 yield ta.complete(proto.VERSION)
             except sd.AlreadyExistsError as e:
                 self.warning("Client %x is already connected." % client_id)
@@ -404,10 +407,9 @@ class Connection:
         yield ta.complete()
     def clients_request(self, ta):
         yield ta.accept()
-        for conn in self.server.connections:
-            if conn.client_id != None:
-                yield ta.notify(conn.client_id, conn.conn_addr,
-                                int(conn.connect_time))
+        for conn in self.server.client_connections:
+            yield ta.notify(conn.client_id, conn.conn_addr,
+                            int(conn.connect_time))
         yield ta.complete()
     def subscription_triggered(self, sub_id, match_type, service):
         subscription = self.server.sd.get_subscription(sub_id)
@@ -465,19 +467,22 @@ class Server:
         self.event_loop.add(self.orphan_timer, self.orphan_timer_activate)
         self.purge_timer = eventloop.Source()
         self.event_loop.add(self.purge_timer, self.purge_timer_activate)
-        self.connections = []
+        self.clientless_connections = set()
+        self.client_connections = set()
+    def num_connections(self):
+        return len(self.clientless_connections) + len(self.client_connections)
     def client_capacity_left(self):
         max_clients = self.sd.max_total_clients()
         if max_clients == None:
             return None
-        return max_clients - len(self.connections)
+        return max_clients - self.num_connections()
     def max_clients_reached(self):
         left = self.client_capacity_left()
         if left == None:
             return False
         return left == 0
     def schedule_purge(self):
-        if len(self.connections) > len(self.sd.clients):
+        if len(self.clientless_connections) > 0:
             self.purge_timer.set_timeout(time.time() + PURGE_INTERVAL)
     def purge_connection(self, conn, handshake_time):
         logger.debug("Dropping connection from %s since it failed to "
@@ -485,14 +490,13 @@ class Server:
                      conn.conn_addr, MAX_HANDSHAKE_TIME)
         conn.terminate()
     def purge_connections(self):
-        num_in_progress = len(self.connections) - len(self.sd.clients)
-        if num_in_progress > 0:
+        if len(self.clientless_connections) > 0:
             logger.debug("Scanning for idle connections. %d connection(s) has "
                          "not completed the protocol hand shake.",
-                         num_in_progress)
+                         len(self.clientless_connections))
             now = time.time()
             failed = []
-            for conn in self.connections:
+            for conn in self.clientless_connections:
                 if conn.client_id == None or \
                    not self.sd.has_client(conn.client_id):
                     handshake_time = now - conn.connect_time
@@ -518,8 +522,9 @@ class Server:
                         conn_sock = sock.accept()
                         self.update_source(source)
                         conn = Connection(self.sd, conn_sock, self.event_loop,
-                                          self, self.conn_terminated)
-                        self.connections.append(conn)
+                                          self, self.conn_handshake_completed,
+                                          self.conn_terminated)
+                        self.clientless_connections.add(conn)
                         self.schedule_purge()
                     except xcm.error as e:
                         self.update_source(source)
@@ -537,17 +542,24 @@ class Server:
         else:
             condition = xcm.SO_ACCEPTABLE
         source.update(condition)
+    def conn_handshake_completed(self, conn):
+        self.clientless_connections.remove(conn)
+        self.client_connections.add(conn)
     def conn_terminated(self, conn):
         if self.max_clients_reached():
             for source in self.server_socks.keys():
                 source.update(xcm.SO_ACCEPTABLE)
-        self.connections.remove(conn)
+        self.client_connections.discard(conn)
+        self.clientless_connections.discard(conn)
     def close_server_socks(self):
         for sock in self.server_socks.values():
             sock.close()
     def terminate(self):
-        while len(self.connections) > 0:
-            self.connections[0].terminate()
+        for connections in (self.clientless_connections,
+                            self.client_connections):
+            while len(connections) > 0:
+                conn = connections.pop()
+                conn.terminate()
         for stream in self.server_socks.keys():
             self.event_loop.remove(stream)
         self.close_server_socks()
