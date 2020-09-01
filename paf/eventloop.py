@@ -67,19 +67,12 @@ class XcmSource (Source):
     def __init__(self, xcm_sock):
         Source.__init__(self)
         self.xcm_sock = xcm_sock
+        self.condition = 0
+        self.set_fds({ xcm_sock.fileno() : select.EPOLLIN })
     def update(self, condition):
-        self.clear_active()
-
-        xcm_fds, xcm_events = self.xcm_sock.want(condition)
-        if len(xcm_fds) == 0:
-            self.clear_fds()
-            if condition != 0:
-                self.set_active()
-        else:
-            fds = {}
-            for xcm_fd, xcm_event in zip(xcm_fds, xcm_events):
-                fds[xcm_fd] = translate(xcm_event)
-            self.set_fds(fds)
+        if condition != self.condition:
+            self.xcm_sock.set_target(condition)
+            self.condition = condition
 
 EPOLL_MAX_TIMEOUT = (((1<<31)-1)/1000)
 
