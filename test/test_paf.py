@@ -167,7 +167,6 @@ class Server:
         while True:
             try:
                 conn = client.connect(addr)
-                conn.ping()
                 conn.close()
                 return
             except client.Error:
@@ -407,20 +406,17 @@ class MultiResponseRecorder(ResponseRecorderBase):
 @pytest.mark.fast
 def test_hello(server):
     conn = client.connect(server.random_domain().random_addr())
-    proto_version = conn.hello()[0]
-    assert proto_version == proto.VERSION
+    assert conn.proto_version == proto.VERSION
 
 @pytest.mark.fast
 def test_invalid_client_id_reuse(server):
     client_id = client.allocate_client_id()
     conn0 = client.connect(server.default_domain().random_addr(),
                            client_id = client_id)
-    conn0.ping()
     conn1 = None
     with pytest.raises(client.ProtocolError, match=".*client-id-exists.*"):
         conn1 = client.connect(server.default_domain().random_addr(),
                                client_id = client_id)
-        conn1.ping()
     if conn1 != None:
         conn1.close()
     conn0.ping()
@@ -1165,7 +1161,6 @@ def test_survives_connection_reset(server):
     time.sleep(service_ttl + 0.25)
 
     conn = client.connect(domain_addr)
-    conn.ping()
     conn.close()
 
 @pytest.mark.fast
@@ -1181,7 +1176,6 @@ def test_survives_connection_reset(server):
     time.sleep(service_ttl + 0.25)
 
     conn = client.connect(domain_addr)
-    conn.ping()
     conn.close()
 
 CLIENT_PROCESS_TTL = 1
@@ -1481,14 +1475,10 @@ def test_many_clients(server):
     conns = []
     while len(conns) < MAX_CLIENTS:
         try:
-            conn = None
             conn = client.connect(domain.default_addr())
-            wait(conn, criteria = conn.ready)
             conns.append(conn)
         except client.TransportError:
-            if conn:
-                conn.close()
-
+            pass
     replies = []
     for i, conn in enumerate(conns):
         cb = lambda ta_id, *args: replies.append(None)
@@ -1499,12 +1489,10 @@ def test_many_clients(server):
     last_conn = None
     try:
         # the server shouldn't be accepting any more connections
-        last_conn = client.connect(domain.default_addr())
-        ping_recorder = SingleResponseRecorder()
-        ping_ta = last_conn.ping(ping_recorder)
-        ping_recorder.ping_ta = ping_ta
-        wait(last_conn, timeout = 0.5, criteria = ping_recorder.completed)
-        assert not ping_recorder.completed()
+        def fail():
+            assert False
+        last_conn = client.connect(domain.default_addr(), ready_cb = fail)
+        wait(last_conn, timeout = 0.5)
         last_conn.close()
     except client.Error:
         pass
@@ -1521,7 +1509,6 @@ def test_list_clients(server):
     other_conns = []
     for i in range(0, FEW_CLIENTS):
         other_conn = client.connect(domain.default_addr())
-        wait(other_conn, criteria = other_conn.ready)
         other_conns.append(other_conn)
 
     recorder = MultiResponseRecorder()
@@ -1573,10 +1560,7 @@ def test_multiple_sockets_per_domain(ms_server):
 def test_connect_by_domain_name(server):
     for domain in server.domains:
         conn_by_name = client.connect(domain.name)
-        conn_by_name.ping()
-
         conn_by_addr = client.connect(domain.random_addr())
-        conn_by_addr.ping()
 
         assert len(conn_by_name.clients()) == 2
 
@@ -1669,23 +1653,25 @@ class ConsumerProcess(multiprocessing.Process):
         self.stop = False
         self.service_ids = []
         self.conn = None
+        self.ready = False
     def handle_term(self, signo, stack):
         self.stop = True
+    def make_ready(self):
+        self.ready = True
     def connect(self):
         try:
-            self.conn = client.connect(self.domain_addr)
-            wait(self.conn, self.conn.ready, CONNECT_TIMEOUT)
-            if not self.conn.ready():
-                self.conn.close()
-                self.conn = None
-                self.result_queue.put(ConsumerResult.CONNECT_FAILED)
-            else:
-                self.conn.ping()
+            self.conn = \
+                client.connect(self.domain_addr, ready_cb = self.make_ready)
+            wait(self.conn, lambda: self.ready, CONNECT_TIMEOUT)
         except proto.Error:
+            pass
+        if not self.ready:
             if self.conn != None:
                 self.conn.close()
-                self.conn = None
+            self.conn = None
             self.result_queue.put(ConsumerResult.CONNECT_FAILED)
+        else:
+            self.conn.ping()
     def allocate_resource(self):
         try:
             if self.resource_type == ResourceType.SERVICE:
@@ -1863,7 +1849,6 @@ def test_tcp_dos(tls_server):
     time.sleep(3)
 
     conn = client.connect(domain_addr)
-    conn.ping()
     conn.close()
 
     for conn in conns:
@@ -1934,7 +1919,6 @@ def exercise_server(domain_addr):
         while True:
             try:
                 conn = client.connect(domain_addr)
-                conn.ping()
                 conn.close()
                 break;
             except proto.TransportError:

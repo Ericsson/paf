@@ -212,20 +212,44 @@ class CompleteCall(Call):
         return self.complete
 
 class Client:
-    def __init__(self, client_id, addr):
+    def __init__(self, client_id, addr, ready_cb):
         self.client_id = client_id
         try:
             self.conn_sock = xcm.connect(addr, xcm.NONBLOCK)
         except xcm.error as e:
             raise TransportError(str(e))
+        self.ready_cb = ready_cb
         self.ta_id = 0
         self.out_wire_msgs = deque()
         self.transactions = {}
+        self.proto_version = None
+        try:
+            self.initial_hello()
+        except:
+            self.close()
+            raise
+    def initial_hello(self):
         self.hello(self.initial_hello_cb)
-        self._ready = False
+        if self.ready_cb == None:
+            wait(self, criteria = lambda: self.proto_version != None)
+    def initial_hello_cb(self, ta_id, event, *args, **optargs):
+        if event == EventType.FAIL:
+            reason = optargs.get('fail_reason')
+            if reason == None:
+                reason = "reason unknown"
+            raise ProtocolError("Protocol establishment failed: %s" % \
+                                reason)
+        elif event == EventType.COMPLETE:
+            selected_version = args[0]
+            if proto.VERSION != selected_version:
+                raise ProtocolError("Server selected unsupported "
+                                    "protocol version %d (required %d)" \
+                                    % (selected_version, proto.VERSION))
+            self.proto_version = selected_version
+            if self.ready_cb != None:
+                self.ready_cb()
     def close(self):
         self.conn_sock.close()
-        self._ready = False
     def hello(self, response_cb=None):
         return self.issue_request(proto.TA_HELLO,
                                   (self.client_id, proto.VERSION,
@@ -340,22 +364,6 @@ class Client:
                 raise TransportError(str(e))
         except ValueError:
             raise ProtocolError("Error decoding response message JSON")
-    def initial_hello_cb(self, ta_id, event, *args, **optargs):
-        if event == EventType.FAIL:
-            reason = optargs.get('fail_reason')
-            if reason == None:
-                reason = "reason unknown"
-            raise ProtocolError("Protocol establishment failed: %s" % \
-                                reason)
-        elif event == EventType.COMPLETE:
-            selected_version = args[0]
-            if proto.VERSION != selected_version:
-                raise ProtocolError("Server selected unsupported "
-                                    "protocol version %d (required %d)" \
-                                    % (selected_version, proto.VERSION))
-            self._ready = True
-    def ready(self):
-        return self._ready
 
 DOMAINS_ENV = 'PAF_DOMAINS'
 DEFAULT_DOMAINS_DIR = '/run/paf/domains.d'
@@ -386,10 +394,10 @@ def domain_addr(domain):
 def allocate_client_id():
     return random.randint(0, ((1<<63) - 1))
 
-def connect(domain_or_addr, client_id = None):
+def connect(domain_or_addr, client_id=None, ready_cb=None):
     addr = domain_addr(domain_or_addr)
     if addr == None:
         addr = domain_or_addr
     if client_id == None:
         client_id = allocate_client_id()
-    return Client(client_id, addr)
+    return Client(client_id, addr, ready_cb)

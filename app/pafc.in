@@ -21,9 +21,7 @@ def usage(name):
 
 def connect(addr):
     try:
-        conn = client.connect(addr)
-        client.wait(conn, conn.ready)
-        return conn
+        return client.connect(addr)
     except client.Error as e:
         print("Error communicationg with Patherfind server: %s." % str(e))
         sys.exit(1)
