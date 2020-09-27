@@ -168,7 +168,7 @@ class Connection:
             self.warning("%s." % str(e))
             self.terminate()
     def try_send(self):
-        for i in range(0, min(MAX_SEND_BATCH, len(self.out_wire_msgs))):
+        for i in range(min(MAX_SEND_BATCH, len(self.out_wire_msgs))):
             try:
                 out_wire_msg = self.out_wire_msgs.popleft()
                 self.conn_sock.send(out_wire_msg)
@@ -517,7 +517,7 @@ class Server:
                 batch_size = self.client_capacity_left()
                 if batch_size == None or batch_size > MAX_ACCEPT_BATCH:
                     batch_size = MAX_ACCEPT_BATCH
-                for i in range(0, batch_size):
+                for i in range(batch_size):
                     try:
                         conn_sock = sock.accept()
                         self.update_source(source)

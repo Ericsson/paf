@@ -24,7 +24,7 @@ def test_multiple_fds_active_source_removed(event_loop):
     fd_source = eventloop.Source()
     source_fds = {}
 
-    for i in range(0, NUM_ACTIVE):
+    for i in range(NUM_ACTIVE):
         pipe = os.pipe()
         rfd = pipe[0]
         source_fds[rfd] = select.EPOLLIN

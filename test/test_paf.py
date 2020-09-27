@@ -35,7 +35,7 @@ SERVER_DEBUG = False
 SERVER_CERT = 'cert/cert-server'
 
 NUM_CLIENT_CERTS = 3
-CLIENT_CERTS = ["cert/cert-client%d" % n for n in range(0, NUM_CLIENT_CERTS)]
+CLIENT_CERTS = ["cert/cert-client%d" % n for n in range(NUM_CLIENT_CERTS)]
 
 os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
 
@@ -194,7 +194,7 @@ def random_server(min_domains, max_domains, min_addrs_per_domain,
                   max_addrs_per_domain):
     server = Server()
     num_domains = random.randint(min_domains, max_domains)
-    for i in range(0, num_domains):
+    for i in range(num_domains):
         num_addrs = random.randint(min_addrs_per_domain, max_addrs_per_domain)
         server.configure_random_domain(num_addrs)
     server.start()
@@ -430,7 +430,7 @@ def test_batch_publish(server):
     service_ids = set()
     ta_ids = set()
     publish_recorders = []
-    for i in range(0, NUM_SERVICES):
+    for i in range(NUM_SERVICES):
         publish_recorder = SingleResponseRecorder()
         service_id = conn.service_id()
         service_ids.add(service_id)
@@ -989,7 +989,7 @@ def test_list_subscriptions(server):
     conns = []
     subscriptions = []
     domain = server.random_domain()
-    for i in range(0, NUM_CLIENTS):
+    for i in range(NUM_CLIENTS):
         conn = client.connect(domain.default_addr())
 
         filter = "(&(name=service-%d)(prop=%d))" % (i, i)
@@ -1019,7 +1019,7 @@ def test_list_services(server):
 
     services = []
 
-    for num in range(0, NUM_SERVICES):
+    for num in range(NUM_SERVICES):
         service_id = conn.service_id()
         service_generation = random.randint(0, 100)
         service_props = {
@@ -1227,7 +1227,7 @@ def test_survives_killed_clients(server):
     num_clients = MAX_CLIENTS-1
     ready_queue = multiprocessing.Queue()
     processes = []
-    for i in range(0, num_clients):
+    for i in range(num_clients):
         p = ClientProcess(domain_addr, ready_queue)
         p.start()
         processes.append(p)
@@ -1335,7 +1335,7 @@ def test_many_orphans(server):
     service_props = {}
     min_service_ttl = 1
     max_service_ttl = 2
-    for service_id in range(0, MANY_ORPHANS):
+    for service_id in range(MANY_ORPHANS):
         conn = client.connect(domain.default_addr())
         service_ttl = random.randint(min_service_ttl, max_service_ttl)
         conn.publish(service_id, service_generation,
@@ -1507,7 +1507,7 @@ def test_list_clients(server):
     conn = client.connect(domain.default_addr())
 
     other_conns = []
-    for i in range(0, FEW_CLIENTS):
+    for i in range(FEW_CLIENTS):
         other_conn = client.connect(domain.default_addr())
         other_conns.append(other_conn)
 
@@ -1573,7 +1573,7 @@ def test_many_requests(server):
     conn = client.connect(server.random_domain().random_addr())
 
     ping_recorders = []
-    for i in range(0, MANY_REQUESTS):
+    for i in range(MANY_REQUESTS):
         ping_recorder = SingleResponseRecorder()
         ta_id = conn.ping(ping_recorder)
         ping_recorder.ta_id = ta_id
@@ -1601,7 +1601,7 @@ def test_slow_client(server):
 
     fast_conn = client.connect(domain_addr)
 
-    for i in range(0, NUM_SERVICES):
+    for i in range(NUM_SERVICES):
         fast_conn.publish(i, 0, {}, 42)
 
     replies = []
@@ -1609,7 +1609,7 @@ def test_slow_client(server):
 
     # try to hog the server with a slow client only issuing new requests,
     # never consuming any responses
-    for i in range(0, NUM_SLOW_CONN_REQS):
+    for i in range(NUM_SLOW_CONN_REQS):
         slow_conn.services(response_cb = cb)
 
     assure_ping(fast_conn, ACCEPTABLE_LATENCY)
@@ -1675,7 +1675,7 @@ class ConsumerProcess(multiprocessing.Process):
     def allocate_resource(self):
         try:
             if self.resource_type == ResourceType.SERVICE:
-                for i in range(0, self.resource_count):
+                for i in range(self.resource_count):
                     service_id = self.conn.service_id()
                     generation = 0
                     service_props = { "name": { "service-%d" % service_id } }
@@ -1686,7 +1686,7 @@ class ConsumerProcess(multiprocessing.Process):
                 self.result_queue.put(ConsumerResult.SUCCESS)
             elif self.resource_type == ResourceType.SUBSCRIPTION:
                 result = ConsumerResult.SUCCESS
-                for i in range(0, self.resource_count):
+                for i in range(self.resource_count):
                     sub_id = self.conn.subscription_id()
                     recorder = MultiResponseRecorder()
                     ta_id = self.conn.subscribe(sub_id, recorder)
@@ -1881,7 +1881,7 @@ def test_unsupported_protocol_version(server):
 def run_leak_clients(domain_addr, num):
     ready_queue = multiprocessing.Queue()
     processes = []
-    for i in range(0, num):
+    for i in range(num):
         unpublish = bool(random.getrandbits(1))
         unsubscribe = bool(random.getrandbits(1))
         p = ClientProcess(domain_addr, ready_queue, unpublish = unpublish,
@@ -1904,7 +1904,7 @@ def get_rss(pid):
 
 def exercise_server(domain_addr):
     # Connect on XCM-level only
-    for i in range(0, 250):
+    for i in range(250):
         while True:
             try:
                 conn = xcm.connect(domain_addr, 0)
@@ -1915,7 +1915,7 @@ def exercise_server(domain_addr):
                 pass
 
     # Connect on Pathfinder protocol level
-    for i in range(0, 250):
+    for i in range(250):
         while True:
             try:
                 conn = client.connect(domain_addr)
@@ -1925,7 +1925,7 @@ def exercise_server(domain_addr):
                 pass
 
     # Spawn off many clients concurrently subscribing and publishing
-    for i in range(0, 50):
+    for i in range(50):
         run_leak_clients(domain_addr, 5)
 
     conn = client.connect(domain_addr)
@@ -1948,7 +1948,7 @@ def test_server_leak(tls_server):
     # there's nondeterminism in terms of things like Python GC and
     # heap fragmentation. Thus, we allow RSS to "sometimes" grow.
 
-    for i in range(0, ALLOWED_RETRIES + 1):
+    for i in range(ALLOWED_RETRIES + 1):
         initial_rss = rss
         exercise_server(domain_addr)
         rss = get_rss(tls_server.process.pid)
