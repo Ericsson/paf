@@ -3,9 +3,10 @@ import logging
 import paf.sd as sd
 import logging
 
-DEFAULT_LOG_FILTER = logging.INFO
-DEFAULT_LOG_FACILITY = logging.handlers.SysLogHandler.LOG_DAEMON
 DEFAULT_LOG_CONSOLE = False
+DEFAULT_LOG_SYSLOG = True
+DEFAULT_LOG_FACILITY = logging.handlers.SysLogHandler.LOG_DAEMON
+DEFAULT_LOG_FILTER = logging.INFO
 
 class Error(Exception):
     def __init__(self, message):
@@ -38,9 +39,14 @@ def path(*args):
 
 class LogConf:
     def __init__(self):
-        self.filter = DEFAULT_LOG_FILTER
-        self.facility = DEFAULT_LOG_FACILITY
         self.console = DEFAULT_LOG_CONSOLE
+        self.syslog = DEFAULT_LOG_SYSLOG
+        self.facility = DEFAULT_LOG_FACILITY
+        self.filter = DEFAULT_LOG_FILTER
+    def set_console(self, console):
+        self.console = console
+    def set_syslog(self, syslog):
+        self.syslog = syslog
     def set_filter(self, level_name):
         try:
             self.filter = LOG_LEVELS[level_name]
@@ -51,8 +57,6 @@ class LogConf:
             self.facility = FACILITY_NAMES[facility]
         except KeyError:
             raise FormatError("log facility", facility, FACILITY_NAMES.keys())
-    def set_console(self, console):
-        self.console = console
     def filter_name(self):
         for name, code in LOG_LEVELS.items():
             if code == self.filter:
@@ -62,9 +66,9 @@ class LogConf:
             if code == self.facility:
                 return name
     def __str__(self):
-        return "{ filter: %s, facility: %s, console: %s }" % \
-            (self.filter_name(), self.facility_name(), \
-             str(self.console).lower())
+        return "{ console: %s, syslog: %s, facility: %s, filter: %s }" % \
+            (str(self.console).lower(), str(self.syslog).lower(), \
+             self.filter_name(), self.facility_name())
 
 class ResourcesClassConf:
     def __init__(self, max_clients = None):
@@ -175,9 +179,10 @@ def dict_copy(dict_value, dict_key, value_type, dict_path, set_value,
 def log_populate(conf, log, path):
     if log == None:
         return
-    dict_copy(log, "filter", str, path, conf.log.set_filter)
-    dict_copy(log, "facility", str, path, conf.log.set_facility)
     dict_copy(log, "console", bool, path, conf.log.set_console)
+    dict_copy(log, "syslog", bool, path, conf.log.set_syslog)
+    dict_copy(log, "facility", str, path, conf.log.set_facility)
+    dict_copy(log, "filter", str, path, conf.log.set_filter)
 
 def domains_populate(conf, domains, path):
     if domains == None:

@@ -27,8 +27,9 @@ def usage(name):
           "'+' separator")
     print("                          may not be used in the addresses.")
     print("  -s                      Enable logging to console.")
-    print("  -l <level>              Filter levels below <level>.")
+    print("  -n                      Disable logging to syslog.")
     print("  -y <facility>           Set syslog facility to use.")
+    print("  -l <level>              Filter levels below <level>.")
     print("  -c <max-clients>        Set the maximum number of allowed "
           "connected clients")
     print("                          to <max-clients>. The default "
@@ -37,21 +38,22 @@ def usage(name):
 
 logger = logging.getLogger()
 
-def setup_logging(console, filter_level, syslog_facility):
+def setup_logging(console, syslog, syslog_facility, filter_level):
     logging.basicConfig(level=filter_level)
-    syslog = SysLogHandler(address = '/dev/log',
-                           facility = syslog_facility)
-    syslog.ident = 'pafd[%d]: ' % os.getpid()
     if not console:
         logger.handlers = []
-    logger.addHandler(syslog)
+    if syslog:
+        syslog = SysLogHandler(address = '/dev/log',
+                               facility = syslog_facility)
+        syslog.ident = 'pafd[%d]: ' % os.getpid()
+        logger.addHandler(syslog)
 
 def early_error(message):
     print(message)
     sys.exit(1)
 
 try:
-    optlist, args = getopt.getopt(sys.argv[1:], 'f:m:sl:y:c:h')
+    optlist, args = getopt.getopt(sys.argv[1:], 'f:m:snl:y:c:h')
 
     conf_filename = None
     for opt, optval in optlist:
@@ -75,6 +77,8 @@ try:
             domains.append(domain)
         elif opt == '-s':
             conf.log.set_console(True)
+        elif opt == '-n':
+            conf.log.set_syslog(False)
         elif opt == '-l':
             conf.log.set_filter(optval)
         elif opt == '-y':
@@ -98,7 +102,8 @@ try:
     if len(conf.domains) == 0:
         early_error("No domains configured.")
 
-    setup_logging(conf.log.console, conf.log.filter, conf.log.facility)
+    setup_logging(conf.log.console, conf.log.syslog, conf.log.facility,
+                  conf.log.filter)
 
     logger.info("Server started. Configuration: %s" % conf)
 
