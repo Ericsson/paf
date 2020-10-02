@@ -2,7 +2,7 @@ bin_SCRIPTS = app/pafd app/pafc app/pafbench
 
 pkgpython_PYTHON = paf/__init__.py paf/client.py paf/filter.py paf/props.py \
 	paf/sd.py paf/xcm.py paf/eventloop.py paf/proto.py paf/server.py \
-	paf/compat.py paf/conf.py
+	paf/conf.py
 
 UMLSRC=doc/pub_client_long_disconnect.plantuml \
 	doc/pub_client_short_disconnect.plantuml \
@@ -15,19 +15,13 @@ XCMCERTNAMES=server client0 client1 client2
 XCMCERTDIRS=$(foreach name,$(XCMCERTNAMES), test/cert/cert-$(name))
 XCMCERTS=$(foreach dir,$(XCMCERTDIRS), $(dir)/cert.pem)
 
-if PYTHON2
-PYTEST=py.test
-else
-PYTEST=py.test-3
-endif
-
 all:
 
 check: cert
 	export PYTHONPATH=$(PWD):$$PYTHONPATH && \
 	export PATH=$(PWD)/app:$$PATH && \
 	cd test && \
-	$(PYTEST) -vv $(TESTOPTS) -s $(TESTS)
+	py.test-3 -vv $(TESTOPTS) -s $(TESTS)
 
 test/cert/ca/ca-cert.pem: test/cert/cert.conf
 	mkdir -p test/cert/ca

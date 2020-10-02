@@ -289,11 +289,7 @@ def wait(conn, criteria = lambda: False, timeout = None):
                 poll = select.poll()
                 client.populate(poll, client_fds, client_events)
                 poll.register(rfd, select.EPOLLIN)
-                try: # only needed in Python 2
-                    poll.poll(time_left)
-                except select.error as e:
-                    if e.args[0] != errno.EINTR:
-                        raise e
+                poll.poll(time_left)
 
             conn.process()
     finally:
@@ -1237,8 +1233,7 @@ def test_survives_killed_clients(server):
         if random.random() < 0.75:
             p.terminate()
         else:
-            # Python 2 is missing the Process.kill() method
-            os.kill(p.pid, signal.SIGKILL)
+            p.kill()
 
     time.sleep(1)
 

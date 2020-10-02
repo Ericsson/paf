@@ -11,7 +11,6 @@ import paf.sd as sd
 import paf.filter
 import paf.props as props
 import paf.eventloop as eventloop
-import paf.compat as compat
 
 logger = logging.getLogger()
 
@@ -207,7 +206,8 @@ class Connection:
             try:
                 subject_key_id = \
                     self.conn_sock.get_attr("tls.peer_subject_key_id")
-                subject_key_id_s = compat.bytes_to_hex(subject_key_id)
+                subject_key_id_s = \
+                    ":".join(["%02x" % b for b in subject_key_id])
                 user_id = "ski:%s" % subject_key_id_s
             except xcm.error as e:
                 log.warning("Unable to retrieve X509v3 Subject Key "

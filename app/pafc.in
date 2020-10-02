@@ -14,7 +14,6 @@ import collections
 
 import paf.client as client
 import paf.props as props
-import paf.compat as compat
 
 def usage(name):
     print("%s <addr>|<domain>" % name)
@@ -85,8 +84,8 @@ class Worker(Thread):
 
         flags = fcntl.fcntl(rfd, fcntl.F_GETFL)
         fcntl.fcntl(rfd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-        self.rpipe = os.fdopen(rfd, compat.fdopen_binary_mode + "r", 0)
-        self.wpipe = os.fdopen(wfd, compat.fdopen_binary_mode + "w", 0)
+        self.rpipe = os.fdopen(rfd, "br", 0)
+        self.wpipe = os.fdopen(wfd, "bw", 0)
 
         self.fun_done = Semaphore(value=0)
     def run(self):

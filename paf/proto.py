@@ -1,6 +1,5 @@
 from enum import Enum
 import collections
-from paf.compat import str_type
 
 VERSION = 2
 
@@ -75,12 +74,12 @@ class PropsField(Field):
     def from_wire(self, wire_props):
         props = collections.defaultdict(set)
         for key, values in wire_props.items():
-            if not isinstance(key, str_type):
+            if not isinstance(key, str):
                 raise ProtocolError("Service property key is not a string")
             if not isinstance(values, list):
                 raise ProtocolError("Service property value is not a list")
             for value in values:
-                if not isinstance(value, (str_type, int)):
+                if not isinstance(value, (str, int)):
                     raise ProtocolError("Service property value is neither "
                                         "string nor integer")
                 props[key].add(value)
