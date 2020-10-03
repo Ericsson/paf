@@ -81,18 +81,15 @@ outages, server hardware and certain software failures.
 ## Installation
 
 The Pathfinder server and related tools are implemented in Python.
-The code base currently supports both Python 2 and 3, but Python 2
-support will be dropped. Beyond the standard modules such as 'json'
-and 'logging', it also requires the 'enum' module, which is not
-standard for Python 2.
 
-In case a server configuration file is used, and also for running the
-test cases, the Python 'yaml' module is needed.
+Python version 3.5 or later is required. In case a server
+configuration file is used, and also for running the test cases, the
+'yaml' module is needed.
 
 In addition, the Pathfinder server depends on the Extensible
 Connection-oriented Messaging (XCM) library, in the form of libxcm.so.
 
-The unit and component-level test suites depends on the py.test
+The unit and component-level test suites depends on the py.test-3
 framework.
 
 Pathfinder build system uses autotools.
