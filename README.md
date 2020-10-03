@@ -88,7 +88,7 @@ configuration file is used, and also for running the test cases, the
 
 In addition, the Pathfinder server depends on Extensible
 Connection-oriented Messaging (XCM), in the form of `libxcm` shared
-library.
+library. XCM API version must be 0.13 or later.
 
 The unit and component-level test suites depends on the py.test-3
 framework.
