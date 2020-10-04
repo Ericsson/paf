@@ -87,34 +87,41 @@ configuration file is used, and also for running the test cases, the
 `yaml` module is needed.
 
 In addition, the Pathfinder server depends on Extensible
-Connection-oriented Messaging (XCM), in the form of `libxcm` shared
-library. XCM API version must be 0.13 or later.
+Connection-oriented Messaging (XCM), in the form of the `libxcm`
+shared library. XCM API version must be 0.13 or later.
+
+The Pathfinder server build uses Python setuptools.
+
+To build, run:
+```
+make
+```
+
+To install, run:
+```
+make install PREFIX=<prefix>
+```
+
+Issuing the appropriate `setup.py` commands directly also works. The
+Makefile is just a simple wrapper.
+
+## Test
 
 The unit and component-level test suites depends on the py.test-3
 framework.
 
-Pathfinder build system uses autotools.
+To run the test suite, run:
+```
+make check
+```
 
-To install, run:
-autoreconf -i && ./configure && make install
-
-Automake tends to install the 'paf' Python module in the
-'site-packages', rather than the 'dist-packages' directory.
-Debian-based Linux distributions do not include 'site-packages' in the
-Python module search path (i.e. sys.path). In that case, or in case a
-non-standard (i.e non /usr/local or /usr) prefix is used, the
-PYTHONPATH environment variable needs to point to 'site-packages' in
-the installation directory tree, in order for the Pathfinder
-applications to find the 'paf' module.
-
-## Server
+## Running the Server
 
 One or more Pathfinder server (daemon) processes are run for each
 service discovery domain. One server instance may serve one or more
-domains, which translate to one or more server socket endpoints (per
-server).
+domains, which translate to one or more server sockets (per server).
 
-To start the server and bind it to a local UNIX domain socket addrees,
+To start the server and bind it to a local UNIX domain socket address,
 run:
 ```
 ./app/pafd ux:test
@@ -129,18 +136,17 @@ and connect it to a server.
 ./app/pafc ux:test
 ```
 
-By using the CLI, the user may publish services, subscribe to
-services, list connected clients, a domain's subscriptions and
-services.
+By using the CLI, the user may publish services, subscribe to services
+and list connected clients, subscriptions and services.
 
 ## Python Client API
 
 Pathfinder includes an API `paf.client` for Python-based clients, which
 is used by the server test suite and the command-line interface.
 
-While this is a production-quality API implementation, it's not meant
-to be the primariy API for consumer and producers. Applications would
-instead use the `libpaf` client library, available in a separate
+While this is a production-quality client implementation, it's not
+meant to be the primariy API for consumer and producers. Applications
+would instead use the `libpaf` client library, available in a separate
 repository. It also has a Python interface.
 
 Compared to `libpaf` and `<paf.h>`, the `paf.client` Python API is

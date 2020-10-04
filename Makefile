@@ -1,8 +1,8 @@
-bin_SCRIPTS = app/pafd app/pafc app/pafbench
+PYTHON=python3
 
-pkgpython_PYTHON = paf/__init__.py paf/client.py paf/filter.py paf/props.py \
-	paf/sd.py paf/xcm.py paf/eventloop.py paf/proto.py paf/server.py \
-	paf/conf.py
+XCMCERTNAMES=server client0 client1 client2
+XCMCERTDIRS=$(foreach name,$(XCMCERTNAMES), test/cert/cert-$(name))
+XCMCERTS=$(foreach dir,$(XCMCERTDIRS), $(dir)/cert.pem)
 
 UMLSRC=doc/pub_client_long_disconnect.plantuml \
 	doc/pub_client_short_disconnect.plantuml \
@@ -11,11 +11,17 @@ UMLSRC=doc/pub_client_long_disconnect.plantuml \
 	doc/server_restart.plantuml
 UMLPNG=$(patsubst %.plantuml,%.png,$(UMLSRC))
 
-XCMCERTNAMES=server client0 client1 client2
-XCMCERTDIRS=$(foreach name,$(XCMCERTNAMES), test/cert/cert-$(name))
-XCMCERTS=$(foreach dir,$(XCMCERTDIRS), $(dir)/cert.pem)
+all: build
 
-all:
+.PHONY: build
+build:
+	$(PYTHON) setup.py build
+
+install:
+	if [ -n "$(PREFIX)" ]; then \
+		args="--prefix $(PREFIX)"; \
+	fi; \
+	$(PYTHON) setup.py install $$args
 
 check: cert
 	export PYTHONPATH=$(PWD):$$PYTHONPATH && \
@@ -68,19 +74,14 @@ count:
 	@echo "Applications:"
 	@wc -l `git ls-files app`
 
-clean-local:
+clean:
 	for d in paf app test; do \
 		rm -f $${d}/*.pyc; \
 		rm -rf $${d}/__pycache__; \
 	done
-	rm -rf .cache
 	rm -f test/domains.d/*
 	rm -f test/test-pafd.conf
 	rm -rf $(XCMCERTDIRS) test/cert/ca
 	rm -f $(UMLPNG)
-
-distclean-local: clean-local
-	find . -name '*~' -print0 | xargs -0 rm -f
-	rm -f missing install-sh missing configure aclocal.m4 Makefile.in \
-		py-compile
-	rm -rf autom4te.cache
+	rm -rf build
+	rm -rf dist
