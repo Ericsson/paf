@@ -105,12 +105,12 @@ make install PREFIX=<prefix>
 Issuing the appropriate `setup.py` commands directly also works. The
 Makefile is just a simple wrapper.
 
-## Test
+## Test Suite
 
 The unit and component-level test suites depends on the py.test-3
 framework.
 
-To run the test suite, run:
+To run the test suite, issue:
 ```
 make check
 ```
@@ -151,10 +151,3 @@ repository. It also has a Python interface.
 
 Compared to `libpaf` and `<paf.h>`, the `paf.client` Python API is
 more low-level and maps closely to the Pathfinder wire protocol.
-
-## Test Suite
-
-To run the unit and component-level test suites, run:
-```
-make check
-```
