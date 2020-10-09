@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright(c) 2020 Ericsson AB
+
 import setuptools
 
 with open("README.md", "r") as fh:

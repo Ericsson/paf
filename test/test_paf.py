@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright(c) 2020 Ericsson AB
+
 #
 # Integration test suite for Pathfinder Server
 #
