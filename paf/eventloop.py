@@ -10,32 +10,27 @@ import fcntl
 import os
 import errno
 
-def translate(xcm_event):
-    mask = 0
-    if xcm_event&xcm.FD_READABLE:
-        mask |= select.EPOLLIN
-    if xcm_event&xcm.FD_WRITABLE:
-        mask |= select.EPOLLOUT
-    return mask
-
 def set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
 class Source:
     def __init__(self):
-        self.fds = None
+        self.fd = None
+        self.mask = None
         self.timeout = None
         self.active = False
         self.listener = None
-    def set_fds(self, fds):
-        if self.fds != fds:
-            self.fds = fds
-            self.dispatch_changed_fds()
-    def clear_fds(self):
-        if self.fds != None:
-            self.fds = None
-            self.dispatch_changed_fds()
+    def set_fd(self, fd, mask):
+        if self.fd != fd or self.mask != mask:
+            self.fd = fd
+            self.mask = mask
+            self.dispatch_changed_fd()
+    def clear_fd(self):
+        if self.fd != None:
+            self.fd = None
+            self.mask = None
+            self.dispatch_changed_fd()
     def set_timeout(self, timeout):
         if self.timeout != timeout:
             self.timeout = timeout
@@ -59,9 +54,9 @@ class Source:
     def dispatch_changed_timeout(self):
         if self.listener != None:
             self.listener.changed_timeout(self)
-    def dispatch_changed_fds(self):
+    def dispatch_changed_fd(self):
         if self.listener != None:
-            self.listener.changed_fds(self)
+            self.listener.changed_fd(self)
     def dispatch_changed_active(self):
         if self.listener != None:
             self.listener.changed_active(self)
@@ -70,7 +65,7 @@ class XcmSource (Source):
     def __init__(self, xcm_sock):
         Source.__init__(self)
         self.xcm_sock = xcm_sock
-        self.set_fds({ xcm_sock.fileno() : select.EPOLLIN })
+        self.set_fd(xcm_sock.fileno(), select.EPOLLIN)
     def update(self, condition):
         self.xcm_sock.update(condition)
 
@@ -79,7 +74,7 @@ EPOLL_MAX_TIMEOUT = (((1<<31)-1)/1000)
 class EventLoop:
     def __init__(self):
         self.source_handler = {}
-        self.source_fds = {}
+        self.source_fd = {}
         self.source_timeout = {}
         self.source_active = set()
         self.fd_source = {}
@@ -99,36 +94,33 @@ class EventLoop:
     def add(self, source, handler):
         self.source_handler[source] = handler
         self._register_timeout(source)
-        self._register_fds(source)
+        self._register_fd(source)
         self._register_active(source)
         source.set_listener(self)
     def remove(self, source):
         source.clear_listener()
-        self._unregister_fds(source)
+        self._unregister_fd(source)
         self._unregister_timeout(source)
         self._unregister_active(source)
         del self.source_handler[source]
-    def changed_fds(self, source):
-        self._unregister_fds(source)
-        self._register_fds(source)
-    def _register_fds(self, source):
-        if source.fds != None:
-            fds = source.fds.copy()
-            self.source_fds[source] = fds
-            for fd, mask in fds.items():
-                self.epoll.register(fd, mask)
-                assert not fd in self.fd_source
-                self.fd_source[fd] = source
-    def _unregister_fds(self, source):
-        fds = self.source_fds.get(source)
-        if fds != None:
-            del self.source_fds[source]
-            for fd, mask in fds.items():
-                try:
-                    self.epoll.unregister(fd)
-                except FileNotFoundError:
-                    pass # fd is closed, and thus removed from epoll
-                del self.fd_source[fd]
+    def changed_fd(self, source):
+        self._unregister_fd(source)
+        self._register_fd(source)
+    def _register_fd(self, source):
+        if source.fd != None:
+            self.source_fd[source] = (source.fd, source.mask)
+            self.epoll.register(source.fd, source.mask)
+            assert not source.fd in self.fd_source
+            self.fd_source[source.fd] = source
+    def _unregister_fd(self, source):
+        if source in self.source_fd:
+            fd, mask = self.source_fd[source]
+            del self.source_fd[source]
+            try:
+                self.epoll.unregister(fd)
+            except FileNotFoundError:
+                pass # fd is closed, and thus removed from epoll
+            del self.fd_source[fd]
     def changed_timeout(self, source):
         self._unregister_timeout(source)
         self._register_timeout(source)
