@@ -279,6 +279,9 @@ def wait(conn, criteria = lambda: False, timeout = None):
         old_wakeup_fd = signal.set_wakeup_fd(wfd)
         if timeout != None:
             deadline = time.time() + timeout
+        poll = select.poll()
+        poll.register(rfd, select.EPOLLIN)
+        poll.register(conn.fileno(), select.EPOLLIN)
         while not criteria():
             if timeout != None:
                 time_left = deadline - time.time()
@@ -286,14 +289,7 @@ def wait(conn, criteria = lambda: False, timeout = None):
                     break
             else:
                 time_left = None
-
-            client_fds, client_events = conn.want()
-            if len(client_fds) > 0:
-                poll = select.poll()
-                client.populate(poll, client_fds, client_events)
-                poll.register(rfd, select.EPOLLIN)
-                poll.poll(time_left)
-
+            poll.poll(time_left)
             conn.process()
     finally:
         if rfd != None:

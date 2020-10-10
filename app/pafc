@@ -94,19 +94,11 @@ class Worker(Thread):
     def run(self):
         try:
             done = False
+            poll = select.poll()
+            poll.register(self.conn.fileno(), select.EPOLLIN)
+            poll.register(self.rpipe, select.EPOLLIN)
             while not done:
-                client_fds, client_events = self.conn.want()
-                if len(client_fds) == 0:
-                    self.conn.process()
-                    continue
-
-                poll = select.poll()
-                client.populate(poll, client_fds, client_events)
-
-                poll.register(self.rpipe, select.EPOLLIN)
-
                 poll.poll()
-
                 self.conn.process()
                 self.run_scheduled()
             os._exit(1)

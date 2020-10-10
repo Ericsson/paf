@@ -13,12 +13,10 @@ def usage(name):
     print("%s <num-services> <num-subscriptions> <addr>" % name)
 
 def wait_for(conn, criteria):
+    poll = select.poll()
+    poll.register(conn.fileno(), select.EPOLLIN)
     while not criteria():
-        client_fds, client_events = conn.want()
-        if len(client_fds) > 0:
-            poll = select.poll()
-            client.populate(poll, client_fds, client_events)
-            poll.poll()
+        poll.poll()
         conn.process()
 
 class EventCounter:

@@ -49,10 +49,6 @@ xcm_fd_c = xcm_c.xcm_fd
 xcm_fd_c.restype = c_int
 xcm_fd_c.argtypes = [c_void_p]
 
-xcm_want_c = xcm_c.xcm_want
-xcm_want_c.restype = c_int
-xcm_want_c.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_long]
-
 xcm_set_blocking_c = xcm_c.xcm_set_blocking
 xcm_set_blocking_c.restype = c_int
 xcm_set_blocking_c.argtypes = [c_void_p, c_bool]
@@ -71,10 +67,6 @@ xcm_attr_get_c.restype = c_int
 xcm_attr_get_c.argtypes = [c_void_p, c_char_p, POINTER(c_int), c_void_p, c_long]
 
 MAX_MSG=65535
-
-FD_READABLE = (1<<0)
-FD_WRITABLE = (1<<1)
-FD_EXCEPTION = (1<<2)
 
 SO_RECEIVABLE = (1<<0)
 SO_SENDABLE = (1<<1)
@@ -105,6 +97,7 @@ def _assure_open(fun):
 class Socket:
     def __init__(self, xcm_socket):
         self.xcm_socket = xcm_socket
+        self.condition = 0
     @_assure_open
     def close(self):
         if self.xcm_socket != None:
@@ -123,28 +116,18 @@ class Socket:
         return xcm_is_blocking_c(self.xcm_socket)
     @_assure_open
     # await is a keyword in recent Python versions
-    def set_target(self, condition):
-        rc = xcm_await_c(self.xcm_socket, condition)
-        if rc < 0:
-            raise ValueError("invalid condition: '%d'" % condition)
+    def update(self, condition):
+        if condition != self.condition:
+            rc = xcm_await_c(self.xcm_socket, condition)
+            if rc < 0:
+                raise ValueError("invalid condition: '%d'" % condition)
+            self.condition = condition
     @_assure_open
     def fileno(self):
         rc = xcm_fd_c(self.xcm_socket)
         if rc < 0:
             _raise_io_err()
         return rc
-    @_assure_open
-    def want(self, condition):
-        int_ary_len = 16
-        int_ary_type = c_int*int_ary_len
-        fds = int_ary_type()
-        events = int_ary_type()
-        rc = xcm_want_c(self.xcm_socket, condition, byref(fds), byref(events),
-                        int_ary_len)
-        if rc < 0:
-            _raise_io_err()
-        else:
-            return (list(fds)[:rc], list(events)[:rc])
     @_assure_open
     def get_attr(self, attr_name):
         attr_type = c_int()

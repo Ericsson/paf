@@ -14,10 +14,6 @@ import paf.xcm as xcm
 import paf.proto as proto
 import paf.props as props
 
-FD_READABLE = xcm.FD_READABLE
-FD_WRITABLE = xcm.FD_WRITABLE
-FD_EXCEPTION = xcm.FD_EXCEPTION
-
 MATCH_TYPE_APPEARED = proto.MATCH_TYPE_APPEARED
 MATCH_TYPE_MODIFIED = proto.MATCH_TYPE_MODIFIED
 MATCH_TYPE_DISAPPEARED = proto.MATCH_TYPE_DISAPPEARED
@@ -131,32 +127,11 @@ class Transaction:
                                 "%s" % list(in_msg.keys()))
         self.cb(self.ta_id, event, *args, **optargs)
 
-def translate(client_fds, client_events):
-    rfds = []
-    wfds = []
-    for fd, event in zip(client_fds, client_events):
-        if event&FD_READABLE:
-            rfds.append(fd)
-        if event&FD_WRITABLE:
-            wfds.append(fd)
-    return (rfds, wfds)
-
-def populate(poll, client_fds, client_events):
-    for xcm_fd, xcm_event in zip(client_fds, client_events):
-        mask = 0
-        if xcm_event&FD_READABLE:
-            mask |= select.POLLIN
-        if xcm_event&FD_WRITABLE:
-            mask |= select.POLLOUT
-        poll.register(xcm_fd, mask)
-
 def wait(conn, criteria):
+    poll = select.poll()
+    poll.register(conn.fileno(), select.POLLIN)
     while not criteria():
-        client_fds, client_events = conn.want()
-        if len(client_fds) > 0:
-            poll = select.poll()
-            populate(poll, client_fds, client_events)
-            poll.poll()
+        poll.poll()
         conn.process()
 
 class Call:
@@ -226,6 +201,7 @@ class Client:
         self.out_wire_msgs = deque()
         self.transactions = {}
         self.proto_version = None
+        self.update()
         try:
             self.initial_hello()
         except:
@@ -322,29 +298,34 @@ class Client:
         self.transactions[ta_id] = transaction
         self.try_send()
         return ta_id
-    def want(self):
+    def fileno(self):
+        return self.conn_sock.fileno()
+    def update(self):
         condition = xcm.SO_RECEIVABLE
         if len(self.out_wire_msgs) > 0:
             condition |= xcm.SO_SENDABLE
-        return self.conn_sock.want(condition)
+        self.conn_sock.update(condition)
     def process(self):
         while self.try_send():
             pass
         while self.try_receive():
             pass
     def try_send(self):
-        if len(self.out_wire_msgs) == 0:
-            return False
         try:
-            out_wire_msg = self.out_wire_msgs.popleft()
-            self.conn_sock.send(out_wire_msg)
-            return True
+            if len(self.out_wire_msgs) > 0:
+                out_wire_msg = self.out_wire_msgs.popleft()
+                self.conn_sock.send(out_wire_msg)
+                return True
+            else:
+                return False
         except xcm.error as e:
             if e.errno == errno.EAGAIN:
                 self.out_wire_msgs.appendleft(out_wire_msg)
                 return False
             else:
                 raise TransportError(str(e))
+        finally:
+            self.update()
     def try_receive(self):
         try:
             in_wire_msg = self.conn_sock.receive()
@@ -367,6 +348,8 @@ class Client:
                 raise TransportError(str(e))
         except ValueError:
             raise ProtocolError("Error decoding response message JSON")
+        finally:
+            self.update()
 
 DOMAINS_ENV = 'PAF_DOMAINS'
 DEFAULT_DOMAINS_DIR = '/run/paf/domains.d'
