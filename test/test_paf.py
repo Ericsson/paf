@@ -44,40 +44,36 @@ os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
 
 random.seed()
 
-def random_name():
-    len = random.randint(1, 32)
+def random_name(min_len = 1):
+    len = random.randint(min_len, max(min_len, 32))
     name = ""
     while len > 0:
-        name += random.choice(string.ascii_lowercase)
+        name += random.choice(string.ascii_letters)
         len -= 1
     return name
 
 def random_ux_addr():
-    return "ux:%s" % random_name()
+    return "ux:%s" % random_name(min_len = 6)
 
 def random_port():
     return random.randint(2000, 32000)
 
+def random_octet():
+    return random.randint(1, 254)
+
+def random_lo_ip():
+    return "127.%d.%d.%d" % (random_octet(), random_octet(), random_octet())
+
 def random_tcp_addr():
-    return "tcp:127.0.0.1:%d" % random_port()
+    return "tcp:%s:%d" % (random_lo_ip(), random_port())
 
 def random_tls_addr():
-    return "tls:127.0.0.1:%d" % random_port()
+    return "tls:%s:%d" % (random_lo_ip(), random_port())
 
 def random_addr():
     addr_fun = \
         random.choice([random_ux_addr, random_tcp_addr, random_tls_addr])
-    while True:
-        addr = addr_fun()
-        try:
-            # This is an attempt to make sure the address is
-            # free. It's a little racey, but should be good enough.
-            server = xcm.server(addr)
-            server.close()
-            return addr
-        except xcm.error:
-            # Socket likely in use - regenerate address
-            pass
+    return addr_fun()
 
 DOMAINS_DIR = 'domains.d'
 CONFIG_FILE = 'test-pafd.conf'
@@ -120,22 +116,32 @@ class Server:
         domain = Domain(name, addrs)
         self.domains.append(domain)
         return domain
-    def set_resources(self, resources):
-        self.resources = resources
-        self.use_config_file = True
     def is_addr_used(self, addr):
         for domain in self.domains:
             if addr in domain.addrs:
                 return True
         return False
-    def configure_random_domain(self, num_addrs):
-        name = random_name()
+    def is_name_used(self, name):
+        for domain in self.domains:
+            if domain.name == name:
+                return True
+        return False
+    def get_random_name(self):
+        while True:
+            name = random_name()
+            if not self.is_name_used(name):
+                return name
+    def configure_random_domain(self, num_addrs, addr_fun = random_addr):
+        name = self.get_random_name()
         addrs = []
         while (len(addrs) < num_addrs):
-            addr = random_addr()
+            addr = addr_fun()
             if not self.is_addr_used(addr):
                 addrs.append(addr)
         return self.configure_domain(name, addrs)
+    def set_resources(self, resources):
+        self.resources = resources
+        self.use_config_file = True
     def _write_config_file(self):
         conf = {}
         if SERVER_DEBUG:
@@ -224,7 +230,7 @@ def ms_server():
 @pytest.yield_fixture(scope='function')
 def tls_server():
     server = Server()
-    server.configure_domain(random_name(), random_tls_addr())
+    server.configure_random_domain(1, addr_fun = random_tls_addr)
     server.start()
     yield server
     server.stop()
@@ -238,8 +244,8 @@ MAX_TOTAL_SUBSCRIPTIONS = 100
 
 def limited_server(resources):
     server = Server()
-    server.configure_domain(random_name(), random_tls_addr())
-    server.configure_domain(random_name(), random_ux_addr())
+    server.configure_random_domain(1, addr_fun = random_tls_addr)
+    server.configure_random_domain(1, addr_fun = random_ux_addr)
     server.set_resources(resources)
     server.start()
     return server
