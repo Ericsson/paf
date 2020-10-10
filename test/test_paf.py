@@ -226,7 +226,8 @@ def tls_server():
     server = Server()
     server.configure_domain(random_name(), random_tls_addr())
     server.start()
-    return server
+    yield server
+    server.stop()
 
 MAX_USER_CLIENTS = 3
 MAX_TOTAL_CLIENTS = 5
@@ -245,24 +246,30 @@ def limited_server(resources):
 
 @pytest.yield_fixture(scope='function')
 def limited_clients_server():
-    return limited_server({
+    server = limited_server({
         "user": { "clients": MAX_USER_CLIENTS },
         "total" : { "clients": MAX_TOTAL_CLIENTS }
     })
+    yield server
+    server.stop()
 
 @pytest.yield_fixture(scope='function')
 def limited_services_server():
-    return limited_server({
+    server = limited_server({
         "user": { "services": MAX_USER_SERVICES },
         "total" : { "services": MAX_TOTAL_SERVICES }
     })
+    yield server
+    server.stop()
 
 @pytest.yield_fixture(scope='function')
 def limited_subscriptions_server():
-    return limited_server({
+    server = limited_server({
         "user": { "subscriptions": MAX_USER_SUBSCRIPTIONS },
         "total" : { "subscriptions": MAX_TOTAL_SUBSCRIPTIONS }
     })
+    yield server
+    server.stop()
 
 def set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
