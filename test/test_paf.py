@@ -1132,8 +1132,8 @@ def test_disconnected_client_orphans_service(server):
     notifications = subscription_recorder.get_notifications()
 
     orphan_since = notifications[1][3]['orphan_since']
-    assert orphan_since >= int(disconnect_time)
-    assert orphan_since <= int(disconnect_time)+1
+    assert orphan_since >= disconnect_time
+    assert orphan_since <= disconnect_time + 0.25
 
     assert notifications == [
         (client.EventType.NOTIFY, client.MATCH_TYPE_APPEARED, service_id,
