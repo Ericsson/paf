@@ -6,7 +6,6 @@
 import sys
 import select
 import os
-import socket
 import time
 from threading import Thread, Semaphore
 import cmd
@@ -18,8 +17,10 @@ import collections
 import paf.client as client
 import paf.props as props
 
+
 def usage(name):
     print("%s <addr>|<domain>" % name)
+
 
 def connect(addr):
     try:
@@ -28,15 +29,18 @@ def connect(addr):
         print("Error communicationg with Patherfind server: %s." % str(e))
         sys.exit(1)
 
+
 def orphan_left(ttl, since):
     timeout = since + ttl
     return timeout - time.time()
+
 
 class MatchPrinter:
     def __init__(self, sub_id):
         self.sub_id = sub_id
         self.accepted = False
         self.failed = False
+
     def __call__(self, ta_id, event, *args, **optargs):
         if event == client.EventType.ACCEPT:
             self.accepted = True
@@ -58,25 +62,26 @@ class MatchPrinter:
                 "Service id: %x" % service_id
             ]
 
-            if generation != None:
+            if generation is not None:
                 info.append("Generation: %d" % generation)
 
-            if ttl != None:
+            if ttl is not None:
                 info.append("TTL: %d" % ttl)
 
-            if orphan_since != None:
-                info.append("Orphan: %.1f s until timeout" % \
+            if orphan_since is not None:
+                info.append("Orphan: %.1f s until timeout" %
                             orphan_left(ttl, orphan_since))
 
-            if owner != None:
+            if owner is not None:
                 info.append("Client Id: 0x%x" % owner)
 
-            if service_props != None:
+            if service_props is not None:
                 info.append("Properties: %s" % props.to_str(service_props))
 
             print("Subscription %x: %s" % (self.sub_id, "; ".join(info)))
         elif event == client.EventType.COMPLETE:
             print("Subscription %x canceled." % self.sub_id)
+
 
 class Worker(Thread):
     def __init__(self, conn):
@@ -91,6 +96,7 @@ class Worker(Thread):
         self.wpipe = os.fdopen(wfd, "bw", 0)
 
         self.fun_done = Semaphore(value=0)
+
     def run(self):
         try:
             done = False
@@ -105,14 +111,16 @@ class Worker(Thread):
         except Exception as e:
             print(str(e))
             os._exit(1)
+
     def dispatch_fun(self, fun):
         self.fun = fun
         self.wpipe.write(b'\0')
         self.fun_done.acquire()
+
     def run_scheduled(self):
         try:
             d = self.rpipe.read(1)
-            if d != None:
+            if d is not None:
                 self.fun()
                 self.fun = None
                 self.fun_done.release()
@@ -121,6 +129,7 @@ class Worker(Thread):
         except Exception as e:
             print(e)
             os._exit(1)
+
     def _cmd_ping(self):
         try:
             start = time.time()
@@ -130,8 +139,10 @@ class Worker(Thread):
             self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_ping(self):
         self.dispatch_fun(self._cmd_ping)
+
     def _cmd_hello(self):
         try:
             proto_version = self.conn.hello()
@@ -139,22 +150,26 @@ class Worker(Thread):
             self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_hello(self):
         self.dispatch_fun(self._cmd_hello)
+
     def _cmd_clients(self):
         try:
             clients = self.conn.clients()
             print("Client Id          Remote Address    Session Uptime")
-            for client in clients:
-                client_id, client_addr, client_time = client
+            for c in clients:
+                client_id, client_addr, client_time = c
                 client_uptime = int(round(time.time() - client_time))
                 uptime_s = datetime.timedelta(seconds=client_uptime)
                 print("%-17x  %-17s %s" % (client_id, client_addr, uptime_s))
             self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_clients(self):
         self.dispatch_fun(self._cmd_clients)
+
     def _cmd_services(self, filter=None):
         try:
             services = self.conn.services(filter=filter)
@@ -169,21 +184,23 @@ class Worker(Thread):
                 orphan_since = None
                 if len(service) >= 6:
                     orphan_since = service[5].get('orphan_since')
-                if orphan_since == None:
+                if orphan_since is None:
                     orphan_s = "-"
                 else:
                     orphan_s = "%6.1f" % orphan_left(service_ttl, orphan_since)
-                print("%16x %4d %4d %11s  %-17x  %s" % \
-                      (service_id, generation, service_ttl, orphan_s, \
+                print("%16x %4d %4d %11s  %-17x  %s" %
+                      (service_id, generation, service_ttl, orphan_s,
                        service_owner, props.to_str(service_props)))
             self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_services(self, filter=None):
         self.dispatch_fun(lambda: self._cmd_services(filter=filter))
+
     def _cmd_publish(self, service_id, generation, service_props, ttl):
         try:
-            if service_id == None:
+            if service_id is None:
                 service_id = self.conn.service_id()
                 print("Service Id %x." % service_id)
             if self._check_service_id(service_id):
@@ -191,9 +208,11 @@ class Worker(Thread):
                 self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_publish(self, service_id, generation, service_props, ttl):
         self.dispatch_fun(lambda: self._cmd_publish(service_id, generation,
                                                     service_props, ttl))
+
     def _cmd_unpublish(self, service_id):
         try:
             if self._check_service_id(service_id):
@@ -201,8 +220,10 @@ class Worker(Thread):
                 self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_unpublish(self, service_id):
         self.dispatch_fun(lambda: self._cmd_unpublish(service_id))
+
     def _cmd_subscribe(self, filter=None):
         sub_id = self.conn.subscription_id()
         print("Subscription Id %x." % sub_id)
@@ -213,8 +234,10 @@ class Worker(Thread):
             self._ok()
         else:
             self._fail(printer.fail_reason)
+
     def cmd_subscribe(self, filter):
         self.dispatch_fun(lambda: self._cmd_subscribe(filter))
+
     def _cmd_unsubscribe(self, sub_id):
         try:
             if self._check_subscription_id(sub_id):
@@ -222,8 +245,10 @@ class Worker(Thread):
                 self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_unsubscribe(self, sub_id):
         self.dispatch_fun(lambda: self._cmd_unsubscribe(sub_id))
+
     def _cmd_subscriptions(self):
         try:
             subscriptions = self.conn.subscriptions()
@@ -238,30 +263,38 @@ class Worker(Thread):
             self._ok()
         except client.Error as e:
             self._fail(e)
+
     def cmd_subscriptions(self):
         self.dispatch_fun(self._cmd_subscriptions)
+
     def _check_id(self, id_type, the_id):
         if the_id < 0:
             print("%s id must be a non-negative integer." % id_type)
             return False
         return True
+
     def _check_service_id(self, service_id):
         return self._check_id("Service", service_id)
+
     def _check_subscription_id(self, service_id):
         return self._check_id("Subscription", service_id)
+
     def _ok(self):
         print("OK.")
+
     def _fail(self, reason):
-        if reason != None:
+        if reason is not None:
             print("Operation failed: %s." % reason.replace("-", " "))
         else:
             print("Operation failed for unknown reasons.")
+
 
 def init(addr):
     conn = connect(addr)
     worker = Worker(conn)
     worker.start()
     return worker
+
 
 def parse_props(args):
     if len(args) % 2 != 0:
@@ -279,42 +312,51 @@ def parse_props(args):
         service_props[args[i]].add(value)
     return service_props
 
+
 def parse_id(id_str):
     try:
         return int(id_str, 16)
     except ValueError:
         raise ValueError("'%s' is not a valid id" % id_str)
 
+
 class PafCli(cmd.Cmd):
     prompt = '> '
+
     def __init__(self, worker):
         self.worker = worker
         cmd.Cmd.__init__(self)
+
     def do_id(self, line):
         """id
         Show local Pathfinder client id."""
         print("Client Id: 0x%x" % self.worker.conn.client_id)
+
     def do_ping(self, line):
         """ping
         Ping the server."""
         self.worker.cmd_ping()
+
     def do_hello(self, line):
         """hello
         Ask server for client id and version information."""
         self.worker.cmd_hello()
+
     def do_services(self, line):
         """services [<filter-expression>]
         List all services (optionally matching the filter expression)."""
         args = shlex.split(line)
         if len(args) == 1:
-            filter=args[0]
+            filter = args[0]
         else:
             filter = None
         self.worker.cmd_services(filter=filter)
+
     def do_clients(self, line):
         """clients
         List clients connected to server."""
         self.worker.cmd_clients()
+
     def do_publish(self, line):
         """publish [<service-id>] <generation> <ttl> [<prop-name> <prop-value>] ...
         Publish a new service, or republish a service with updated
@@ -344,6 +386,7 @@ class PafCli(cmd.Cmd):
             print("%s." % e)
         except IndexError:
             print("Service name is missing.")
+
     def do_unpublish(self, line):
         """unpublish <service-id>
         Unpublish a service."""
@@ -352,13 +395,14 @@ class PafCli(cmd.Cmd):
             self.worker.cmd_unpublish(service_id)
         except ValueError as e:
             print("%s." % e)
+
     def do_subscribe(self, line):
         """subscribe [<filter-expression>]
         Subscribe to changes in services (with optional filter expression)."""
         try:
             args = shlex.split(line)
             if len(args) == 1:
-                filter=args[0]
+                filter = args[0]
             else:
                 filter = None
             self.worker.cmd_subscribe(filter=filter)
@@ -366,6 +410,7 @@ class PafCli(cmd.Cmd):
             print("%s." % e)
         except IndexError:
             print("Subscription filter expression is missing.")
+
     def do_unsubscribe(self, line):
         """unsubscribe <subscription-id>
         Unsubscribe a service."""
@@ -374,18 +419,22 @@ class PafCli(cmd.Cmd):
             self.worker.cmd_unsubscribe(ta_id)
         except ValueError as e:
             print("%s." % e)
+
     def do_subscriptions(self, line):
         """subscriptions
         List all subscriptions."""
         self.worker.cmd_subscriptions()
+
     def do_quit(self, line):
         """quit
         Close the connection and quit."""
         print("")
         return True
+
     def emptyline(self):
         pass
     do_EOF = do_quit
+
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:

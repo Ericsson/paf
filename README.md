@@ -110,6 +110,9 @@ Makefile is just a simple wrapper.
 The unit and component-level test suites depends on the py.test-3
 framework.
 
+`flake8` is used to verify coding style for all Python files, and
+needs to be installed.
+
 To run the test suite, issue:
 ```
 make check

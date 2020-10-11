@@ -22,58 +22,67 @@ CMD_UNPUBLISH = 'unpublish'
 CMD_PING = 'ping'
 CMD_CLIENTS = 'clients'
 
+
 class Field:
     def __init__(self, name):
         self.name = name
+
     def python_name(self):
         return self.name.replace('-', '_')
+
     def pull(self, in_msg, opt=False):
         value = in_msg.get(self.name)
-        if value == None and opt:
+        if value is None and opt:
             return None
-        if value == None:
+        if value is None:
             raise ProtocolError("Message is missing required "
                                 "field \"%s\"" % self.name)
         del in_msg[self.name]
         return value
+
     def put(self, value, out_msg):
         out_msg[self.name] = value
+
 
 class StringField(Field):
     pass
 
+
 class UIntField(Field):
     def pull(self, value, opt=False):
         value = Field.pull(self, value, opt=opt)
-        if value == None:
+        if value is None:
             return None
         if not isinstance(value, int):
-            raise ProtocolError("Message field %s is not an integer" % \
+            raise ProtocolError("Message field %s is not an integer" %
                                 self.name)
         if value < 0:
-            raise ProtocolError("Message field %s has the negative " \
+            raise ProtocolError("Message field %s has the negative "
                                 "value %d" % (self.name, value))
         return value
+
 
 class NumberField(Field):
     def pull(self, value, opt=False):
         value = Field.pull(self, value, opt=opt)
-        if value == None:
+        if value is None:
             return None
         if not isinstance(value, (int, float)):
-            raise ProtocolError("Message field %s is not a number" % \
+            raise ProtocolError("Message field %s is not a number" %
                                 self.name)
         return value
+
 
 class PropsField(Field):
     def pull(self, in_msg, opt=False):
         wire_props = Field.pull(self, in_msg, opt=opt)
-        if wire_props == None:
+        if wire_props is None:
             return None
         if not isinstance(wire_props, dict):
-            raise ProtocolError("Value for field %s is not a dictionary" % \
+            raise ProtocolError("Value for field %s is not a dictionary" %
                                 self.name)
         return self.from_wire(wire_props)
+
     def from_wire(self, wire_props):
         props = collections.defaultdict(set)
         for key, values in wire_props.items():
@@ -87,14 +96,17 @@ class PropsField(Field):
                                         "string nor integer")
                 props[key].add(value)
         return props
+
     def put(self, props, out_msg):
         out_msg[self.name] = self.to_wire(props)
+
     def to_wire(self, props):
         wire_props = collections.defaultdict(list)
         for key, values in props.items():
             for value in values:
                 wire_props[key].append(value)
         return wire_props
+
 
 FIELD_TA_CMD = StringField('ta-cmd')
 FIELD_TA_ID = UIntField('ta-id')
@@ -138,11 +150,14 @@ FAIL_REASON_PERMISSION_DENIED = 'permission-denied'
 FAIL_REASON_OLD_GENERATION = 'old-generation'
 FAIL_REASON_INSUFFICIENT_RESOURCES = 'insufficient-resources'
 
+
 class InteractionType(Enum):
     SINGLE_RESPONSE = 0
     MULTI_RESPONSE = 1
 
+
 TA_TYPES = {}
+
 
 class TransactionType:
     def __init__(self, cmd, ia_type, request_fields=[],
@@ -169,84 +184,94 @@ class TransactionType:
         self.opt_fail_fields = opt_fail_fields
         TA_TYPES[cmd] = self
 
+
 TA_HELLO = TransactionType(
     CMD_HELLO,
     InteractionType.SINGLE_RESPONSE,
-    request_fields = [FIELD_CLIENT_ID, FIELD_PROTO_MIN_VERSION,
-                      FIELD_PROTO_MAX_VERSION],
-    complete_fields = [FIELD_PROTO_VERSION],
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    request_fields=[
+        FIELD_CLIENT_ID, FIELD_PROTO_MIN_VERSION, FIELD_PROTO_MAX_VERSION
+    ],
+    complete_fields=[FIELD_PROTO_VERSION],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_SUBSCRIBE = TransactionType(
     CMD_SUBSCRIBE,
     InteractionType.MULTI_RESPONSE,
-    request_fields = [FIELD_SUBSCRIPTION_ID],
-    opt_request_fields = [FIELD_FILTER],
-    notify_fields = [FIELD_MATCH_TYPE, FIELD_SERVICE_ID],
-    opt_notify_fields = [FIELD_GENERATION, FIELD_SERVICE_PROPS, FIELD_TTL,
-                         FIELD_CLIENT_ID, FIELD_ORPHAN_SINCE],
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    request_fields=[FIELD_SUBSCRIPTION_ID],
+    opt_request_fields=[FIELD_FILTER],
+    notify_fields=[FIELD_MATCH_TYPE, FIELD_SERVICE_ID],
+    opt_notify_fields=[
+        FIELD_GENERATION, FIELD_SERVICE_PROPS, FIELD_TTL, FIELD_CLIENT_ID,
+        FIELD_ORPHAN_SINCE
+    ],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_UNSUBSCRIBE = TransactionType(
     CMD_UNSUBSCRIBE,
     InteractionType.SINGLE_RESPONSE,
-    request_fields = [FIELD_SUBSCRIPTION_ID],
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    request_fields=[FIELD_SUBSCRIPTION_ID],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_SUBSCRIPTIONS = TransactionType(
     CMD_SUBSCRIPTIONS,
     InteractionType.MULTI_RESPONSE,
-    notify_fields = [FIELD_SUBSCRIPTION_ID, FIELD_CLIENT_ID],
-    opt_notify_fields = [FIELD_FILTER]
+    notify_fields=[FIELD_SUBSCRIPTION_ID, FIELD_CLIENT_ID],
+    opt_notify_fields=[FIELD_FILTER]
 )
 
 TA_SERVICES = TransactionType(
     CMD_SERVICES,
     InteractionType.MULTI_RESPONSE,
-    opt_request_fields = [FIELD_FILTER],
-    notify_fields = [FIELD_SERVICE_ID, FIELD_GENERATION, FIELD_SERVICE_PROPS,
-                     FIELD_TTL, FIELD_CLIENT_ID],
-    opt_notify_fields = [FIELD_ORPHAN_SINCE],
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    opt_request_fields=[FIELD_FILTER],
+    notify_fields=[
+        FIELD_SERVICE_ID, FIELD_GENERATION, FIELD_SERVICE_PROPS, FIELD_TTL,
+        FIELD_CLIENT_ID
+    ],
+    opt_notify_fields=[FIELD_ORPHAN_SINCE],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_PUBLISH = TransactionType(
     CMD_PUBLISH,
     InteractionType.SINGLE_RESPONSE,
-    request_fields = [FIELD_SERVICE_ID, FIELD_GENERATION,
-                      FIELD_SERVICE_PROPS, FIELD_TTL],
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    request_fields=[
+        FIELD_SERVICE_ID, FIELD_GENERATION, FIELD_SERVICE_PROPS, FIELD_TTL
+    ],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_UNPUBLISH = TransactionType(
     CMD_UNPUBLISH,
     InteractionType.SINGLE_RESPONSE,
-    request_fields = [FIELD_SERVICE_ID],
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    request_fields=[FIELD_SERVICE_ID],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_PING = TransactionType(
     CMD_PING,
     InteractionType.SINGLE_RESPONSE,
-    opt_fail_fields = [FIELD_FAIL_REASON]
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_CLIENTS = TransactionType(
     CMD_CLIENTS,
     InteractionType.MULTI_RESPONSE,
-    notify_fields = [FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME]
+    notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME]
 )
+
 
 class Error(Exception):
     def __init__(self, message):
         Exception.__init__(self, message)
 
+
 class ProtocolError(Error):
     def __init__(self, message):
         Error.__init__(self, message)
+
 
 class TransportError(Error):
     def __init__(self, message):

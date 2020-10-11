@@ -5,11 +5,11 @@
 # xcm.py - A Python API to Extensible Connection-oriented Messaging (XCM).
 #
 
-import sys
 import os
 import socket
 
-from ctypes import *
+from ctypes import CDLL, c_void_p, c_char_p, c_long, c_int, c_bool, cast, \
+    POINTER, create_string_buffer, byref, get_errno
 
 xcm_c = CDLL("libxcm.so.0", use_errno=True)
 
@@ -64,15 +64,17 @@ ATTR_TYPE_BIN = 4
 
 xcm_attr_get_c = xcm_c.xcm_attr_get
 xcm_attr_get_c.restype = c_int
-xcm_attr_get_c.argtypes = [c_void_p, c_char_p, POINTER(c_int), c_void_p, c_long]
+xcm_attr_get_c.argtypes = \
+    [c_void_p, c_char_p, POINTER(c_int), c_void_p, c_long]
 
-MAX_MSG=65535
+MAX_MSG = 65535
 
-SO_RECEIVABLE = (1<<0)
-SO_SENDABLE = (1<<1)
-SO_ACCEPTABLE = (1<<2)
+SO_RECEIVABLE = (1 << 0)
+SO_SENDABLE = (1 << 1)
+SO_ACCEPTABLE = (1 << 2)
 
-NONBLOCK = (1<<0)
+NONBLOCK = (1 << 0)
+
 
 def _conv_attr(attr_type, attr_value, attr_len):
     if attr_type.value == ATTR_TYPE_BOOL:
@@ -88,32 +90,39 @@ def _conv_attr(attr_type, attr_value, attr_len):
     else:
         raise ValueError("Invalid argument type %d" % attr_type.value)
 
+
 def _assure_open(fun):
     def assure_open_wrap(self, *args, **kwargs):
-        assert self.xcm_socket != None
+        assert self.xcm_socket is not None
         return fun(self, *args, **kwargs)
     return assure_open_wrap
+
 
 class Socket:
     def __init__(self, xcm_socket):
         self.xcm_socket = xcm_socket
         self.condition = 0
+
     @_assure_open
     def close(self):
-        if self.xcm_socket != None:
+        if self.xcm_socket is not None:
             xcm_close_c(self.xcm_socket)
             self.xcm_socket = None
+
     @_assure_open
     def finish(self):
         rc = xcm_finish_c(self.xcm_socket)
         if rc < 0:
             _raise_io_err()
+
     @_assure_open
     def set_blocking(self, val):
         xcm_set_blocking_c(self.xcm_socket, val)
+
     @_assure_open
     def is_blocking(self):
         return xcm_is_blocking_c(self.xcm_socket)
+
     @_assure_open
     # await is a keyword in recent Python versions
     def update(self, condition):
@@ -122,12 +131,14 @@ class Socket:
             if rc < 0:
                 raise ValueError("invalid condition: '%d'" % condition)
             self.condition = condition
+
     @_assure_open
     def fileno(self):
         rc = xcm_fd_c(self.xcm_socket)
         if rc < 0:
             _raise_io_err()
         return rc
+
     @_assure_open
     def get_attr(self, attr_name):
         attr_type = c_int()
@@ -138,24 +149,31 @@ class Socket:
         if rc < 0:
             _raise_io_err()
         return _conv_attr(attr_type, attr_value, rc)
+
     def __del__(self):
-        if self.xcm_socket != None:
+        if self.xcm_socket is not None:
             self.close()
+
 
 def _raise_io_err():
     _errno = get_errno()
     raise error(_errno, os.strerror(_errno))
 
-class error(socket.error): pass
+
+class error(socket.error):
+    pass
+
 
 class ConnectionSocket(Socket):
     def __init__(self, xcm_socket):
         Socket.__init__(self, xcm_socket)
+
     def send(self, msg):
         rc = xcm_send_c(self.xcm_socket, msg, len(msg))
         if rc < 0:
             _raise_io_err()
         return 0
+
     def receive(self):
         buf = create_string_buffer(MAX_MSG)
         rc = xcm_receive_c(self.xcm_socket, byref(buf), MAX_MSG)
@@ -163,9 +181,11 @@ class ConnectionSocket(Socket):
             _raise_io_err()
         return bytes(buf.raw[:rc])
 
+
 class ServerSocket(Socket):
     def __init__(self, xcm_socket):
         Socket.__init__(self, xcm_socket)
+
     def accept(self):
         xcm_socket = xcm_accept_c(self.xcm_socket)
         if xcm_socket:
@@ -173,12 +193,14 @@ class ServerSocket(Socket):
         else:
             _raise_io_err()
 
+
 def connect(addr, flags):
     xcm_socket = xcm_connect_c(addr.encode('utf-8'), flags)
     if xcm_socket:
         return ConnectionSocket(xcm_socket)
     else:
         _raise_io_err()
+
 
 def server(addr):
     xcm_socket = xcm_server_c(addr.encode('utf-8'))

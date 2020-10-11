@@ -9,8 +9,10 @@ import time
 
 import paf.client as client
 
+
 def usage(name):
     print("%s <num-services> <num-subscriptions> <addr>" % name)
+
 
 def wait_for(conn, criteria):
     poll = select.poll()
@@ -19,16 +21,20 @@ def wait_for(conn, criteria):
         poll.poll()
         conn.process()
 
+
 class EventCounter:
     def __init__(self, event_type, target):
         self.target = target
         self.event_type = event_type
         self.events = []
+
     def __call__(self, ta_id, event_type, *args, **optargs):
         if self.event_type == event_type:
             self.events.append(args)
+
     def done(self):
         return len(self.events) == self.target
+
 
 def subscribe(conn, start_num, count):
     subscription_counter = EventCounter(client.EventType.ACCEPT,
@@ -36,9 +42,10 @@ def subscribe(conn, start_num, count):
     for num in range(start_num, start_num+count):
         sub_id = num
         conn.subscribe(sub_id, subscription_counter,
-                       filter = "(name=service-%d)" % num)
+                       filter="(name=service-%d)" % num)
 
     wait_for(conn, subscription_counter.done)
+
 
 def unsubscribe(conn, start_num, count):
     unsubscription_counter = EventCounter(client.EventType.COMPLETE,
@@ -49,6 +56,7 @@ def unsubscribe(conn, start_num, count):
 
     wait_for(conn, unsubscription_counter.done)
 
+
 def publish(conn, start_num, count):
     publish_counter = EventCounter(client.EventType.COMPLETE,
                                    count)
@@ -57,12 +65,13 @@ def publish(conn, start_num, count):
     for num in range(start_num, start_num+count):
         service_id = num
         conn.publish(service_id, generation, {
-            "name": { "service-%d" % num },
-            "addr" : { "tls:10.10.10.10:4711" },
-            "color": { "green" }
+            "name": {"service-%d" % num},
+            "addr": {"tls:10.10.10.10:4711"},
+            "color": {"green"}
             }, ttl, publish_counter)
 
     wait_for(conn, publish_counter.done)
+
 
 def unpublish(conn, start_num, count):
     unpublish_counter = EventCounter(client.EventType.COMPLETE,
@@ -73,22 +82,26 @@ def unpublish(conn, start_num, count):
 
     wait_for(conn, unpublish_counter.done)
 
+
 def ping(conn, count):
-    ping_counter = EventCounter(client.EventType.COMPLETE,
-                                     count)
+    ping_counter = EventCounter(client.EventType.COMPLETE, count)
     for i in range(0, count):
         conn.ping(ping_counter)
 
     wait_for(conn, ping_counter.done)
 
+
 def pre_populate(conn, num_services, num_subscriptions):
     subscribe(conn, 0, num_subscriptions)
     publish(conn, 0, num_services)
 
+
 def cleanup(conn, num_services):
     unpublish(conn, 0, num_services)
 
-TEST_ITER=16
+
+TEST_ITER = 16
+
 
 def benchmark_publish_unpublish(conn, num_services, num_subscriptions):
     print("Pathfinder pre-populated state")
@@ -132,6 +145,7 @@ def benchmark_publish_unpublish(conn, num_services, num_subscriptions):
     print("Ping: %.3f ms/op" % (1000*(latency/TEST_ITER)))
 
     cleanup(conn, num_services)
+
 
 if len(sys.argv) != 4:
     usage(sys.argv[0])

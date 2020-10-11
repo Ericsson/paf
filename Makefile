@@ -23,7 +23,10 @@ install:
 	fi; \
 	$(PYTHON) setup.py install $$args
 
-check: cert
+flake8:
+	$(PYTHON) -m flake8 src test app/pafd app/pafc app/pafbench
+
+check: cert flake8
 	export PYTHONPATH=$(PWD):$$PYTHONPATH && \
 	export PATH=$(PWD)/app:$$PATH && \
 	cd test && \

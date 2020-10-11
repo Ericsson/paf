@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright(c) 2020 Ericsson AB
 
-import collections
 
 def check_key(key):
     if not isinstance(key, str):
         raise ValueError("property key is not a string")
 
+
 def check_value(value):
     if not isinstance(value, (str, int)):
         raise ValueError("property value is not an string or "
-                             "number: '%s'" % value)
+                         "number: '%s'" % value)
+
 
 def to_str(props):
     kvs = []
