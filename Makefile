@@ -24,7 +24,7 @@ install:
 	$(PYTHON) setup.py install $$args
 
 flake8:
-	$(PYTHON) -m flake8 src test app/pafd app/pafc app/pafbench
+	$(PYTHON) -m flake8 paf test app/pafd app/pafc app/pafbench
 
 check: cert flake8
 	export PYTHONPATH=$(PWD):$$PYTHONPATH && \
