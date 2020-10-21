@@ -28,7 +28,7 @@ library communicates with zero or more Pathfinder `pafd` servers.
 
 A service discovery implementation that might easily come to mind is
 to store services in a centralized or distributed database. Unlike
-such a design, Pathfinder doesn’t keep the authoritative state in a
+such a design, Pathfinder doesn't keep the authoritative state in a
 database in the traditional sense, but rather it's distributed among
 the `libpaf` instances of the consumer and producer processes. One
 reason to keep the authorative service state in or close to the
