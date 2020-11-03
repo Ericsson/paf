@@ -81,7 +81,7 @@ class LogConf:
                 return name
 
     def __str__(self):
-        return "{ console: %s, syslog: %s, facility: %s, filter: %s }" % \
+        return "{ console: %s, syslog: %s, filter: %s, facility: %s }" % \
             (str(self.console).lower(), str(self.syslog).lower(),
              self.filter_name(), self.facility_name())
 
