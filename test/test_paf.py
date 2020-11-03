@@ -91,7 +91,7 @@ def random_addr():
 
 
 DOMAINS_DIR = 'domains.d'
-CONFIG_FILE = 'test-pafd.conf'
+CONFIG_FILE = 'pafd-test.conf'
 
 
 class Domain:
