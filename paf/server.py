@@ -15,6 +15,12 @@ import paf.filter
 import paf.props as props
 import paf.eventloop as eventloop
 
+MAJOR_VERSION = 1
+MINOR_VERSION = 0
+PATCH_VERSION = 0
+
+VERSION = "%d.%d.%d" % (MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)
+
 logger = logging.getLogger()
 
 

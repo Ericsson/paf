@@ -25,7 +25,7 @@ import yaml
 import paf.client as client
 import paf.proto as proto
 import paf.xcm as xcm
-
+import paf.server
 
 MAX_CLIENTS = 250
 
@@ -2149,3 +2149,13 @@ def test_handle_signals():
             os.remove(domain_uxf_file)
         except OSError:
             pass
+
+
+def test_version_consistency():
+    setup = subprocess.Popen(["/usr/bin/python3", "./setup.py", "--version"],
+                             cwd="../", stdout=subprocess.PIPE)
+    setup.wait()
+
+    setup_version = setup.stdout.read().decode('utf-8').rstrip()
+
+    assert setup_version == paf.server.VERSION
