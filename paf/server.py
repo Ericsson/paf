@@ -182,7 +182,10 @@ class Connection:
                 self.try_send()
             self.update_source()
         except xcm.error as e:
-            self.debug("Error on socket send or receive: %s." % e)
+            if e.errno == 0:
+                self.debug("Connection is closed.")
+            else:
+                self.debug("Error on socket send or receive: %s." % e)
             self.terminate()
         except proto.Error as e:
             self.warning("%s." % str(e))
