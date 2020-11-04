@@ -112,7 +112,8 @@ try:
     setup_logging(conf.log.console, conf.log.syslog, conf.log.facility,
                   conf.log.filter)
 
-    logger.info("Server started. Configuration: %s" % conf)
+    logger.info("Server version %s started. Configuration: %s" %
+                (paf.server.VERSION, conf))
 
     event_loop = paf.eventloop.EventLoop()
     try:
