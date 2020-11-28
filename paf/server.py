@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright(c) 2020 Ericsson AB
 
-import logging
 import json
 from collections import deque
 import errno
@@ -14,14 +13,13 @@ import paf.sd as sd
 import paf.filter
 import paf.props as props
 import paf.eventloop as eventloop
+from paf.logging import LogCategory, debug, info, warning
 
 MAJOR_VERSION = 1
 MINOR_VERSION = 0
 PATCH_VERSION = 0
 
 VERSION = "%d.%d.%d" % (MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)
-
-logger = logging.getLogger()
 
 
 class Transaction:
@@ -42,7 +40,8 @@ class Transaction:
             self.ta_type = self.lookup_type(ta_cmd)
 
             self.debug("Processing \"%s\" command request with transaction "
-                       "id %d." % (self.ta_type.cmd, self.ta_id))
+                       "id %d." % (self.ta_type.cmd, self.ta_id),
+                       LogCategory.PROTOCOL)
 
             request_args = []
             for field in self.ta_type.request_fields:
@@ -73,7 +72,7 @@ class Transaction:
         out_msg = {}
 
         self.debug("Responding with message type \"%s\" in transaction %d." %
-                   (msg_type, self.ta_id))
+                   (msg_type, self.ta_id), LogCategory.PROTOCOL)
 
         proto.FIELD_TA_CMD.put(self.ta_type.cmd, out_msg)
         proto.FIELD_TA_ID.put(self.ta_id, out_msg)
@@ -145,24 +144,24 @@ class Connection:
         self.sub_tas = {}
         self.connect_time = time.time()
         self.handshaked = False
-        logger.info("Accepted new client connection from \"%s\"." %
-                    self.conn_addr)
+        info("Accepted new client connection from \"%s\"." %
+             self.conn_addr, LogCategory.PROTOCOL)
 
-    def format_entry(self, msg):
+    def log(self, log_fun, msg, category):
         if self.client_id is not None:
             client = "0x%x" % self.client_id
         else:
             client = "unknown"
-        return "<%s> %s" % (client, msg)
+        log_fun("<%s> %s" % (client, msg), category)
 
-    def debug(self, msg):
-        logger.debug(self.format_entry(msg))
+    def debug(self, msg, category):
+        self.log(debug, msg, category)
 
-    def info(self, msg):
-        logger.info(self.format_entry(msg))
+    def info(self, msg, category):
+        self.log(info, msg, category)
 
-    def warning(self, msg):
-        logger.warning(self.format_entry(msg))
+    def warning(self, msg, category):
+        self.log(warning, msg, category)
 
     def sendable(self):
         return len(self.out_wire_msgs) > 0
@@ -189,12 +188,13 @@ class Connection:
             self.update_source()
         except xcm.error as e:
             if e.errno == 0:
-                self.debug("Connection is closed.")
+                self.debug("Connection is closed.", LogCategory.PROTOCOL)
             else:
-                self.debug("Error on socket send or receive: %s." % e)
+                self.debug("Error on socket send or receive: %s." % e,
+                           LogCategory.PROTOCOL)
             self.terminate()
         except proto.Error as e:
-            self.warning("%s." % str(e))
+            self.warning("%s." % str(e), LogCategory.PROTOCOL)
             self.terminate()
 
     def try_send(self):
@@ -202,7 +202,8 @@ class Connection:
             try:
                 out_wire_msg = self.out_wire_msgs.popleft()
                 self.conn_sock.send(out_wire_msg)
-                self.debug("Sent message: %s." % out_wire_msg)
+                self.debug("Sent message: %s." % out_wire_msg,
+                           LogCategory.PROTOCOL)
             except xcm.error as e:
                 if e.errno != errno.EAGAIN:
                     raise
@@ -213,7 +214,8 @@ class Connection:
             in_wire_msg = self.conn_sock.receive()
             if len(in_wire_msg) == 0:
                 raise xcm.error(0, "Connection closed")
-            self.debug("Received message: %s" % in_wire_msg)
+            self.debug("Received message: %s" % in_wire_msg,
+                       LogCategory.PROTOCOL)
             self.request(in_wire_msg)
         except xcm.error as e:
             if e.errno != errno.EAGAIN:
@@ -227,7 +229,8 @@ class Connection:
                 self.respond(response)
         else:
             self.warning("Attempt to issue \"%s\" before issuing \"%s\"." %
-                         (ta.ta_type.cmd, proto.CMD_HELLO))
+                         (ta.ta_type.cmd, proto.CMD_HELLO),
+                         LogCategory.SECURITY)
             self.respond(ta.fail(fail_reason=proto.FAIL_REASON_NO_HELLO))
 
     def invoke_handler(self, ta, args, optargs):
@@ -247,7 +250,7 @@ class Connection:
             except xcm.error:
                 self.warning("Unable to retrieve X509v3 Subject Key "
                              "Identifier. This attribute only exists in "
-                             "XCM version 12 or later.")
+                             "XCM version 12 or later.", LogCategory.SECURITY)
         if self.conn_addr.startswith("tcp") or \
            (user_id is None and self.conn_addr.startswith("tls")):
             ip = self.conn_addr.split(":")[1]
@@ -260,31 +263,34 @@ class Connection:
         if self.client_id is None:
             self.client_id = client_id
         elif self.client_id != client_id:
-            self.warning("Attempt to change client id denied.")
+            self.warning("Attempt to change client id denied.",
+                         LogCategory.SECURITY)
             yield ta.fail(fail_reason=proto.FAIL_PERMISSION_DENIED)
             return
         elif self.handshaked:
             self.debug("Received hello from client with handshake "
-                       "procedure already successfully completed.")
+                       "procedure already successfully completed.",
+                       LogCategory.PROTOCOL)
             yield ta.complete(proto.VERSION)
             return
         if min_version == max_version:
             self.debug("Client supports protocol version %d (only)." %
-                       min_version)
+                       min_version, LogCategory.PROTOCOL)
         else:
             self.debug("Client supports protocol versions between "
-                       "%d and %d." % (min_version, max_version))
+                       "%d and %d." % (min_version, max_version),
+                       LogCategory.PROTOCOL)
         user_id = self.determine_user_id()
-        self.info("User id is \"%s\"." % user_id)
+        self.info("User id is \"%s\"." % user_id, LogCategory.SECURITY)
         if proto.VERSION >= min_version and proto.VERSION <= max_version:
             try:
                 self.sd.client_connect(self.client_id, user_id)
-                self.debug("Handshake producedure finished.")
+                self.debug("Handshake producedure finished.",
+                           LogCategory.PROTOCOL)
                 self.handshaked = True
                 self.handshake_cb(self)
                 yield ta.complete(proto.VERSION)
             except sd.AlreadyExistsError:
-                self.warning("Client %x is already connected." % client_id)
                 # There's a race between which of client and server
                 # sees that the connection is down. If the client
                 # wins, he might reconnect before the server has yet
@@ -292,14 +298,17 @@ class Connection:
                 # this will cause the new hello request to
                 # fail. However, the client will retry, so it's not an
                 # issue.
+                self.warning("Client %x is already connected." % client_id,
+                             LogCategory.PROTOCOL)
                 yield ta.fail(fail_reason=proto.FAIL_REASON_CLIENT_ID_EXISTS)
             except sd.ResourceError as e:
-                self.warning("Unable to connect: %s." % e)
+                self.warning("Unable to connect: %s." % e,
+                             LogCategory.SECURITY)
                 reason = proto.FAIL_REASON_INSUFFICIENT_RESOURCES
                 yield ta.fail(fail_reason=reason)
         else:
             self.warning("Client doesn't support protocol version %d." %
-                         proto.VERSION)
+                         proto.VERSION, LogCategory.PROTOCOL)
             reason = proto.FAIL_REASON_UNSUPPORTED_PROTOCOL_VERSION
             yield ta.fail(fail_reason=reason)
 
@@ -315,7 +324,7 @@ class Connection:
             if filter is not None:
                 log_msg += " with filter \"%s\"" % filter
             log_msg += "."
-            self.debug(log_msg)
+            self.debug(log_msg, LogCategory.CORE)
             yield ta.accept()
             # Subscription creation and activation must be separate,
             # to avoid having the match callback called before the
@@ -323,16 +332,17 @@ class Connection:
             self.sd.activate_subscription(sub_id)
         except paf.filter.ParseError as e:
             self.warning("Received subscription request with malformed "
-                         "filter: %s." % str(e))
+                         "filter: %s." % str(e), LogCategory.PROTOCOL)
             reason = proto.FAIL_REASON_INVALID_FILTER_SYNTAX
             yield ta.fail(fail_reason=reason)
         except sd.AlreadyExistsError as e:
-            self.warning("Received invalid subscription request: %s." % e)
+            self.warning("Received invalid subscription request: %s." % e,
+                         LogCategory.PROTOCOL)
             reason = proto.FAIL_REASON_SUBSCRIPTION_ID_EXISTS
             yield ta.fail(fail_reason=reason)
         except sd.ResourceError as e:
             self.warning("Resource error processing subscription request %x: "
-                         "%s." % (sub_id, e))
+                         "%s." % (sub_id, e), LogCategory.SECURITY)
             reason = proto.FAIL_REASON_INSUFFICIENT_RESOURCES
             yield ta.fail(fail_reason=reason)
 
@@ -344,15 +354,15 @@ class Connection:
             yield sub_ta.complete()
             yield ta.complete()
             self.debug("Canceled subscription %d in transaction %d." %
-                       (sub_id, sub_ta.ta_id))
+                       (sub_id, sub_ta.ta_id), LogCategory.CORE)
         except sd.PermissionError as e:
             self.warning("Permission error while unsubscribing %x: "
-                         "%s." % (sub_id, e))
+                         "%s." % (sub_id, e), LogCategory.SECURITY)
             reason = proto.FAIL_REASON_PERMISSION_DENIED
             yield ta.fail(fail_reason=reason)
         except sd.NotFoundError:
             self.warning("Attempted to unsubscribe to non-existent "
-                         "subscription %d." % sub_id)
+                         "subscription %d." % sub_id, LogCategory.PROTOCOL)
             reason = proto.FAIL_REASON_NON_EXISTENT_SUBSCRIPTION_ID
             yield ta.fail(fail_reason=reason)
 
@@ -371,9 +381,10 @@ class Connection:
             if filter is not None:
                 filter = paf.filter.parse(filter)
                 self.debug("Accepted list request for services "
-                           "matching %s." % str(filter))
+                           "matching %s." % str(filter), LogCategory.CORE)
             else:
-                self.debug("Accepted list request for all services.")
+                self.debug("Accepted list request for all services.",
+                           LogCategory.CORE)
             yield ta.accept()
             for service in self.sd.get_services():
                 if filter is None or filter.match(service.props):
@@ -383,8 +394,8 @@ class Connection:
                                     orphan_since=service.orphan_since)
             yield ta.complete()
         except paf.filter.ParseError as e:
-            self.debug("Received list services request with malformed "
-                       "filter: %s." % str(e))
+            self.info("Received list services request with malformed "
+                      "filter: %s." % str(e), LogCategory.CORE)
             yield ta.fail(fail_reason=proto.FAIL_REASON_INVALID_FILTER_SYNTAX)
 
     def publish_request(self, ta, service_id, generation, service_props, ttl):
@@ -395,7 +406,8 @@ class Connection:
                 self.debug("Published new service with id %x, generation %d, "
                            "props %s and TTL %d s." %
                            (service_id, generation,
-                            props.to_str(service_props), ttl))
+                            props.to_str(service_props), ttl),
+                           LogCategory.CORE)
             else:
                 log_msg = "Re-published service with id %x. " \
                     "Generation %d -> %d." \
@@ -413,19 +425,19 @@ class Connection:
                 if service.client_id != service.before.client_id:
                     log_msg += " Owner is changed from %x to %x." \
                                % (service.before.client_id, service.client_id)
-                self.debug(log_msg)
+                self.debug(log_msg, LogCategory.CORE)
             yield ta.complete()
         except sd.PermissionError as e:
             self.warning("Permission error while publishing service %x: "
-                         "%s." % (service_id, e))
+                         "%s." % (service_id, e), LogCategory.SECURITY)
             yield ta.fail(fail_reason=proto.FAIL_REASON_PERMISSION_DENIED)
         except sd.ResourceError as e:
             self.warning("Resource error while publishing service %x: "
-                         "%s." % (service_id, e))
+                         "%s." % (service_id, e), LogCategory.SECURITY)
             yield ta.fail(fail_reason=proto.FAIL_REASON_INSUFFICIENT_RESOURCES)
         except sd.GenerationError as e:
             self.warning("Error while re-publishing service %x: %s." %
-                         (service_id, e))
+                         (service_id, e), LogCategory.CORE)
             yield ta.fail(fail_reason=proto.FAIL_REASON_OLD_GENERATION)
 
     def unpublish_request(self, ta, service_id):
@@ -433,16 +445,17 @@ class Connection:
             service_props = self.sd.get_service(service_id).props
             self.sd.unpublish(service_id, self.client_id)
             self.debug("Unpublished service %s with service id %x." %
-                       (props.to_str(service_props), service_id))
+                       (props.to_str(service_props), service_id),
+                       LogCategory.CORE)
             yield ta.complete()
         except sd.PermissionError as e:
             self.warning("Permission error while trying to unpublish service "
-                         "id %x: %s." % (service_id, e))
+                         "id %x: %s." % (service_id, e), LogCategory.SECURITY)
             reason = proto.FAIL_REASON_PERMISSION_DENIED
             yield ta.fail(fail_reason=reason)
         except sd.NotFoundError:
             self.warning("Attempted to unpublish non-existent service "
-                         "id %d." % service_id)
+                         "id %d." % service_id, LogCategory.PROTOCOL)
             reason = proto.FAIL_REASON_NON_EXISTENT_SERVICE_ID
             yield ta.fail(fail_reason=reason)
 
@@ -465,7 +478,8 @@ class Connection:
         self.debug("Subscription id %d %s received %s event by "
                    "service id %x with properties %s." %
                    (sub_id, filter_s, match_type.name,
-                    service.service_id, props.to_str(service.props)))
+                    service.service_id, props.to_str(service.props)),
+                   LogCategory.CORE)
         proto_match_type = getattr(proto, "MATCH_TYPE_%s" %
                                    match_type.name)
         ta = self.sub_tas[sub_id]
@@ -484,7 +498,7 @@ class Connection:
         self.update_source()
 
     def terminate(self):
-        self.info("Disconnected.")
+        self.info("Disconnected.", LogCategory.PROTOCOL)
         if self.handshaked:
             self.sd.client_disconnect(self.client_id)
         self.event_loop.remove(self.conn_source)
@@ -540,16 +554,16 @@ class Server:
             self.purge_timer.set_timeout(time.time() + PURGE_INTERVAL)
 
     def purge_connection(self, conn, handshake_time):
-        logger.debug("Dropping connection from %s since it failed to "
-                     "finish the protocol handshake within %.1f s.",
-                     conn.conn_addr, MAX_HANDSHAKE_TIME)
+        debug("Dropping connection from %s since it failed to "
+              "finish the protocol handshake within %.1f s." %
+              (conn.conn_addr, MAX_HANDSHAKE_TIME), LogCategory.PROTOCOL)
         conn.terminate()
 
     def purge_connections(self):
         if len(self.clientless_connections) > 0:
-            logger.debug("Scanning for idle connections. %d connection(s) has "
-                         "not completed the protocol hand shake.",
-                         len(self.clientless_connections))
+            debug("Scanning for idle connections. %d connection(s) has "
+                  "not completed the protocol hand shake." %
+                  len(self.clientless_connections), LogCategory.PROTOCOL)
             now = time.time()
             failed = []
             for conn in self.clientless_connections:
@@ -587,13 +601,14 @@ class Server:
                     except xcm.error as e:
                         self.update_source(source)
                         if e.errno != errno.EAGAIN:
-                            logger.debug("Error accepting client: %s" % e)
+                            debug("Error accepting client: %s" % e,
+                                  LogCategory.PROTOCOL)
                         break
 
     def orphan_timer_activate(self):
         timed_out = self.sd.purge_orphans()
         for orphan_id in timed_out:
-            logger.debug("Timed out orphan service %x." % orphan_id)
+            debug("Timed out orphan service %x." % orphan_id, LogCategory.CORE)
         self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
 
     def update_source(self, source):

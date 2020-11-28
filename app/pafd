@@ -13,6 +13,7 @@ import paf.sd
 import paf.server
 import paf.eventloop
 import paf.conf
+from paf.logging import LogCategory, info, exception
 
 
 def usage(name):
@@ -40,18 +41,14 @@ def usage(name):
     print("  -h                      Print this text.")
 
 
-logger = logging.getLogger()
-
-
 def setup_logging(console, syslog, syslog_facility, filter_level):
     logging.basicConfig(level=filter_level)
     if not console:
-        logger.handlers = []
+        paf.logging.logger.handlers = []
     if syslog:
-        syslog = SysLogHandler(address='/dev/log',
-                               facility=syslog_facility)
+        syslog = SysLogHandler(address='/dev/log', facility=syslog_facility)
         syslog.ident = 'pafd[%d]: ' % os.getpid()
-        logger.addHandler(syslog)
+        paf.logging.logger.addHandler(syslog)
 
 
 def early_error(message):
@@ -112,8 +109,8 @@ try:
     setup_logging(conf.log.console, conf.log.syslog, conf.log.facility,
                   conf.log.filter)
 
-    logger.info("Server version %s started. Configuration: %s" %
-                (paf.server.VERSION, conf))
+    info("Server version %s started. Configuration: %s" %
+         (paf.server.VERSION, conf), LogCategory.CORE)
 
     event_loop = paf.eventloop.EventLoop()
     try:
@@ -126,12 +123,12 @@ try:
 
         event_loop.run()
 
-        logger.info("Exiting.")
+        info("Exiting.", LogCategory.CORE)
         for server in servers:
             server.terminate()
         sys.exit(0)
     except Exception:
-        logger.exception("Terminating due to exception.")
+        exception("Terminating due to exception.")
         for server in servers:
             server.close_server_socks()
         sys.exit(1)
