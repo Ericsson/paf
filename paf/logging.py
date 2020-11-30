@@ -3,6 +3,7 @@
 
 
 import logging
+import logging.handlers
 import enum
 
 
@@ -14,6 +15,24 @@ class LogCategory(enum.Enum):
 
 
 logger = logging.getLogger()
+
+
+def configure(console=True, syslog=True, syslog_ident=None,
+              syslog_facility=logging.handlers.SysLogHandler.LOG_DAEMON,
+              filter_level=logging.INFO):
+    logging.basicConfig(level=filter_level)
+    if not console:
+        logger.handlers = []
+    if syslog:
+        syslog = logging.handlers.SysLogHandler(address='/dev/log',
+                                                facility=syslog_facility)
+        if syslog_ident is not None:
+            syslog.ident = syslog_ident
+        add_handler(syslog)
+
+
+def add_handler(handler):
+    logger.handlers.append(handler)
 
 
 def _log(log_fun, msg, category):
