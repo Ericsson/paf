@@ -123,6 +123,7 @@ class Server:
         self.process = None
         self.use_config_file = False
         self.resources = None
+        self.hook = None
 
         os.environ['PAF_DOMAINS'] = DOMAINS_DIR
         os.system("mkdir -p %s" % DOMAINS_DIR)
@@ -188,6 +189,8 @@ class Server:
 
     def _cmd(self):
         cmd = ["pafd"]
+        if self.hook is not None:
+            cmd.extend(["-r", self.hook])
         if self.use_config_file:
             self._write_config_file()
             cmd.extend(["-f", CONFIG_FILE])
@@ -214,12 +217,15 @@ class Server:
                     conn.close()
                 time.sleep(0.05)
 
-    def start(self):
+    def start(self, python_path=None):
         if self.process is not None:
             return
         cmd = self._cmd()
         pafd_env = os.environ.copy()
         pafd_env['XCM_TLS_CERT'] = SERVER_CERT
+        if python_path is not None:
+            pafd_env['PYTHONPATH'] = "%s:%s" % \
+                (python_path, pafd_env['PYTHONPATH'])
         self.process = subprocess.Popen(cmd, env=pafd_env)
         self._assure_up()
 
@@ -2116,6 +2122,25 @@ def xcm_has_uxf():
         return True
     except xcm.error:
         return False
+
+
+@pytest.mark.fast
+def test_daemon_hook():
+    open("hook.py", "w+").write("""
+def run(servers):
+    open("hook.tmp", "w+").write("%d" % len(servers))
+""")
+    server = Server()
+    server.configure_random_domain(1)
+    server.hook = "hook.run"
+    server.start(python_path=os.getcwd())
+    time.sleep(1)
+    server.stop()
+
+    assert int(open("hook.tmp").read()) == 1
+
+    os.remove("hook.py")
+    os.remove("hook.tmp")
 
 
 @pytest.mark.fast
