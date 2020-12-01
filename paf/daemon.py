@@ -42,7 +42,24 @@ def early_error(message):
     sys.exit(1)
 
 
-def run(conf):
+def run_hook(hook, servers):
+    try:
+        import importlib
+        module_name = '.'.join(hook.split('.')[:-1])
+        fun_name = hook.split('.')[-1]
+        module = importlib.import_module(module_name)
+        fun = getattr(module, fun_name)
+
+        info("Running user hook \"%s\"." % hook, LogCategory.CORE)
+
+        fun(servers)
+    except Exception:
+        exception("Error while calling the user-supplied hook \"%s\"." %
+                  hook)
+        sys.exit(1)
+
+
+def run(conf, hook=None):
     syslog_ident = 'pafd[%d]: ' % os.getpid()
     paf.logging.configure(conf.log.console, conf.log.syslog, syslog_ident,
                           conf.log.facility, conf.log.filter)
@@ -61,6 +78,9 @@ def run(conf):
                                        event_loop)
             servers.append(server)
 
+        if hook is not None:
+            run_hook(hook, servers)
+
         event_loop.run()
 
         info("Exiting.", LogCategory.CORE)
@@ -78,7 +98,9 @@ def run(conf):
 
 def main(argv):
     try:
-        optlist, args = getopt.getopt(argv[1:], 'f:m:snl:y:c:h')
+        hook = None
+
+        optlist, args = getopt.getopt(argv[1:], 'f:m:snl:y:c:r:h')
 
         conf_filename = None
         for opt, optval in optlist:
@@ -117,6 +139,8 @@ def main(argv):
                         conf.resources.total.set_limit("clients", clients)
                 except ValueError:
                     early_error("Client limit must be an integer.")
+            elif opt == '-r':
+                hook = optval
             elif opt == '-h':
                 usage(argv[0])
                 sys.exit(0)
@@ -127,7 +151,7 @@ def main(argv):
         if len(conf.domains) == 0:
             early_error("No domains configured.")
 
-        run(conf)
+        run(conf, hook)
 
     except getopt.GetoptError as e:
         early_error("Error parsning command line: %s." % e)
