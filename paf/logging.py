@@ -35,12 +35,6 @@ def add_handler(handler):
     logger.handlers.append(handler)
 
 
-def _log(log_fun, msg, category):
-    # 'msg_id' as per RFC 5424
-    extra = {'msg_id': category.name}
-    log_fun(msg, extra=extra)
-
-
 def debug(msg, category):
     logger.debug(msg, {'msg_id': category})
 
