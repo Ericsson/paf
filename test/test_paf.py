@@ -1341,7 +1341,7 @@ def test_survives_killed_clients(server):
         if random.random() < 0.75:
             p.terminate()
         else:
-            p.kill()
+            os.kill(p.pid, signal.SIGKILL)
 
     time.sleep(1)
 
