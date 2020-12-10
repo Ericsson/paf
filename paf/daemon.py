@@ -64,9 +64,6 @@ def run(conf, hook=None):
     paf.logging.configure(conf.log.console, conf.log.syslog, syslog_ident,
                           conf.log.facility, conf.log.filter)
 
-    info("Server version %s started with configuration: %s" %
-         (paf.server.VERSION, conf), LogCategory.CORE)
-
     event_loop = paf.eventloop.EventLoop()
 
     try:
@@ -80,6 +77,9 @@ def run(conf, hook=None):
 
         if hook is not None:
             run_hook(hook, servers)
+
+        info("Server version %s started with configuration: %s" %
+             (paf.server.VERSION, conf), LogCategory.CORE)
 
         event_loop.run()
 
