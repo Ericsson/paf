@@ -253,7 +253,8 @@ class Connection:
                              "XCM version 12 or later.", LogCategory.SECURITY)
         if self.conn_addr.startswith("tcp") or \
            (user_id is None and self.conn_addr.startswith("tls")):
-            ip = self.conn_addr.split(":")[1]
+            ip_port = self.conn_addr.split(":", 1)[1]
+            ip = ip_port.rsplit(":", 1)[0]
             user_id = "ip:%s" % ip
         if user_id is None:
             user_id = sd.DEFAULT_USER_ID
