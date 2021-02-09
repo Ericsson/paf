@@ -48,7 +48,10 @@ class StringField(Field):
     pass
 
 
-class UIntField(Field):
+NON_NEGATIVE_INT_MAX = (1 << 63) - 1
+
+
+class NonNegativeIntField(Field):
     def pull(self, value, opt=False):
         value = Field.pull(self, value, opt=opt)
         if value is None:
@@ -57,8 +60,12 @@ class UIntField(Field):
             raise ProtocolError("Message field %s is not an integer" %
                                 self.name)
         if value < 0:
-            raise ProtocolError("Message field %s has the negative "
+            raise ProtocolError("Message field %s has a negative "
                                 "value %d" % (self.name, value))
+        if value > NON_NEGATIVE_INT_MAX:
+            raise ProtocolError("Message field %s has too large a value "
+                                "%d to be represented in a signed 64-bit "
+                                "integer" % (self.name, value))
         return value
 
 
@@ -109,29 +116,29 @@ class PropsField(Field):
 
 
 FIELD_TA_CMD = StringField('ta-cmd')
-FIELD_TA_ID = UIntField('ta-id')
+FIELD_TA_ID = NonNegativeIntField('ta-id')
 FIELD_MSG_TYPE = StringField('msg-type')
 
 FIELD_FAIL_REASON = StringField('fail-reason')
 
-FIELD_PROTO_MIN_VERSION = UIntField('protocol-minimum-version')
-FIELD_PROTO_MAX_VERSION = UIntField('protocol-maximum-version')
-FIELD_PROTO_VERSION = UIntField('protocol-version')
+FIELD_PROTO_MIN_VERSION = NonNegativeIntField('protocol-minimum-version')
+FIELD_PROTO_MAX_VERSION = NonNegativeIntField('protocol-maximum-version')
+FIELD_PROTO_VERSION = NonNegativeIntField('protocol-version')
 
 FIELD_SERVICE_PROPS = PropsField('service-props')
-FIELD_SERVICE_ID = UIntField('service-id')
-FIELD_GENERATION = UIntField('generation')
+FIELD_SERVICE_ID = NonNegativeIntField('service-id')
+FIELD_GENERATION = NonNegativeIntField('generation')
 
-FIELD_TTL = UIntField('ttl')
+FIELD_TTL = NonNegativeIntField('ttl')
 FIELD_ORPHAN_SINCE = NumberField('orphan-since')
 
-FIELD_SUBSCRIPTION_ID = UIntField('subscription-id')
+FIELD_SUBSCRIPTION_ID = NonNegativeIntField('subscription-id')
 
 FIELD_FILTER = StringField('filter')
 
-FIELD_CLIENT_ID = UIntField('client-id')
+FIELD_CLIENT_ID = NonNegativeIntField('client-id')
 FIELD_CLIENT_ADDR = StringField('client-address')
-FIELD_TIME = UIntField('time')
+FIELD_TIME = NonNegativeIntField('time')
 
 FIELD_MATCH_TYPE = StringField('match-type')
 

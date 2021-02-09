@@ -1539,6 +1539,30 @@ def test_misbehaving_clients(server):
     run_misbehaving_client(domain_addr,
                            json.dumps(negative_uint).encode('utf-8'))
 
+    too_large_ta_id = {
+        proto.FIELD_TA_CMD.name: proto.CMD_HELLO,
+        proto.FIELD_TA_ID.name: 1 << 63,
+        proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
+        proto.FIELD_CLIENT_ID.name: 4711,
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
+    }
+    run_misbehaving_client(domain_addr,
+                           json.dumps(too_large_ta_id).encode('utf-8'),
+                           skip_hello=True)
+
+    too_large_client_id = {
+        proto.FIELD_TA_CMD.name: proto.CMD_HELLO,
+        proto.FIELD_TA_ID.name: 99,
+        proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
+        proto.FIELD_CLIENT_ID.name: 1 << 99,
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
+    }
+    run_misbehaving_client(domain_addr,
+                           json.dumps(too_large_client_id).encode('utf-8'),
+                           skip_hello=True)
+
     extra_fields = {
         proto.FIELD_TA_CMD.name: proto.CMD_SERVICES,
         proto.FIELD_TA_ID.name: 42,
@@ -1550,10 +1574,16 @@ def test_misbehaving_clients(server):
 
     missing_ta_id = {
         proto.FIELD_TA_CMD.name: proto.CMD_HELLO,
-        proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST
+        proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
+        proto.FIELD_CLIENT_ID.name: 4711,
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
     }
     run_misbehaving_client(domain_addr,
                            json.dumps(missing_ta_id).encode('utf-8'))
+    run_misbehaving_client(domain_addr,
+                           json.dumps(missing_ta_id).encode('utf-8'),
+                           skip_hello=True)
 
     missing_fields = {
         proto.FIELD_TA_CMD.name: proto.CMD_SUBSCRIBE,
