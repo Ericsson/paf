@@ -17,6 +17,8 @@ MATCH_TYPE_APPEARED = proto.MATCH_TYPE_APPEARED
 MATCH_TYPE_MODIFIED = proto.MATCH_TYPE_MODIFIED
 MATCH_TYPE_DISAPPEARED = proto.MATCH_TYPE_DISAPPEARED
 
+MAX_MSGS_PER_ROUND = 128
+
 ProtocolError = proto.ProtocolError
 TransportError = proto.TransportError
 Error = proto.Error
@@ -351,10 +353,12 @@ class Client:
         self.conn_sock.update(condition)
 
     def process(self):
-        while self.try_send():
-            pass
-        while self.try_receive():
-            pass
+        for i in range(0, MAX_MSGS_PER_ROUND):
+            if not self.try_send():
+                break
+        for i in range(0, MAX_MSGS_PER_ROUND):
+            if not self.try_receive():
+                break
 
     def try_send(self):
         try:

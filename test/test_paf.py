@@ -21,6 +21,7 @@ import threading
 import collections
 import multiprocessing
 import yaml
+import queue
 
 import paf.client as client
 import paf.proto as proto
@@ -39,6 +40,8 @@ CLIENT_CERTS = ["cert/cert-client%d" % n for n in range(NUM_CLIENT_CERTS)]
 os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
 
 random.seed()
+
+spawn_mp = multiprocessing.get_context('spawn')
 
 
 def random_name(min_len=1):
@@ -1280,10 +1283,10 @@ def test_survives_connection_reset(server):
 CLIENT_PROCESS_TTL = 1
 
 
-class ClientProcess(multiprocessing.Process):
+class ClientProcess(spawn_mp.Process):
     def __init__(self, domain_addr, ready_queue, unpublish=True,
                  unsubscribe=True):
-        multiprocessing.Process.__init__(self)
+        spawn_mp.Process.__init__(self)
         self.domain_addr = domain_addr
         self.ready_queue = ready_queue
         self.unpublish = unpublish
@@ -1329,7 +1332,7 @@ def test_survives_killed_clients(server):
     domain_addr = server.random_domain().random_addr()
 
     num_clients = MAX_CLIENTS-1
-    ready_queue = multiprocessing.Queue()
+    ready_queue = spawn_mp.Queue()
     processes = []
     for i in range(num_clients):
         p = ClientProcess(domain_addr, ready_queue)
@@ -1486,6 +1489,58 @@ def test_orphan_race(server):
     assert len(conn1.services()) == 1
 
     conn1.close()
+
+
+ORDERING_MAX_TTL = 3
+
+
+def test_orphan_ordering(server):
+    domain_addr = server.random_domain().random_addr()
+
+    pub_conn = client.connect(domain_addr)
+    sub_conn = client.connect(domain_addr)
+
+    ttls = {}
+    for i in range(MANY_ORPHANS):
+        service_id = i
+        service_ttl = random.randint(0, ORDERING_MAX_TTL)
+        ttls[service_id] = service_ttl
+
+        pub_conn.publish(service_id, 0, {}, service_ttl)
+
+    sub_recorder = MultiResponseRecorder()
+    ta_id = sub_conn.subscribe(sub_conn.subscription_id(),
+                               sub_recorder)
+    sub_recorder.ta_id = ta_id
+
+    def many_appeared():
+        return len([True for n in sub_recorder.get_notifications()
+                    if n[1] == client.MATCH_TYPE_APPEARED]) == MANY_ORPHANS
+
+    wait(sub_conn, criteria=many_appeared)
+
+    pub_conn.close()
+
+    wait(sub_conn, timeout=(ORDERING_MAX_TTL + 1))
+
+    notifications = sub_recorder.get_notifications()
+
+    removed = 0
+    prev_ttl = None
+    for n in notifications:
+        event_type, match_type, service_id, *rest = n
+        if match_type == client.MATCH_TYPE_DISAPPEARED:
+            if prev_ttl is not None:
+                ttl = ttls[service_id]
+                assert ttl >= prev_ttl
+                prev_ttl = ttl
+            else:
+                prev_ttl = ttls[service_id]
+            removed += 1
+
+    assert removed == MANY_ORPHANS
+
+    sub_conn.close()
 
 
 def run_misbehaving_client(addr, junk_msg, skip_hello=True):
@@ -1791,6 +1846,82 @@ def test_slow_client(server):
     fast_conn.close()
 
 
+class PingProcess(spawn_mp.Process):
+    def __init__(self, domain_addr, queue, duration):
+        spawn_mp.Process.__init__(self)
+        self.domain_addr = domain_addr
+        self.queue = queue
+        self.duration = duration
+
+    def run(self):
+        try:
+            deadline = time.time() + self.duration
+
+            start = time.time()
+            conn = client.connect(self.domain_addr)
+            highest_latency = time.time() - start
+
+            while time.time() < deadline:
+                latency = conn.ping()
+                if latency > highest_latency:
+                    highest_latency = latency
+                time.sleep(0.1)
+
+            conn.close()
+
+            self.queue.put(highest_latency)
+
+            sys.exit(0)
+        except paf.client.Error:
+            sys.exit(1)
+
+
+MANY_SERVICES = 5000
+PING_CLIENT_DURATION = 4
+
+
+def test_large_client_disconnect(server):
+    domain_addr = server.random_domain().random_addr()
+
+    pub_conn = client.connect(domain_addr)
+    sub_conn = client.connect(domain_addr)
+
+    for i in range(MANY_SERVICES):
+        service_props = {
+            "name": {"service-%d" % i},
+            "value": {0}
+        }
+        service_ttl = int(PING_CLIENT_DURATION/2)
+        pub_conn.publish(pub_conn.service_id(), 0, service_props, service_ttl)
+
+    subscription_recorder = MultiResponseRecorder()
+    ta_id = sub_conn.subscribe(sub_conn.subscription_id(),
+                               subscription_recorder)
+    subscription_recorder.ta_id = ta_id
+
+    q = spawn_mp.Queue()
+    p = PingProcess(domain_addr, q, PING_CLIENT_DURATION)
+    p.start()
+
+    time.sleep(0.25)
+
+    pub_conn.close()
+
+    highest_latency = None
+    while highest_latency is None:
+        wait(sub_conn, timeout=0.25)
+        try:
+            highest_latency = q.get_nowait()
+        except queue.Empty:
+            pass
+
+    p.join()
+
+    sub_conn.close()
+
+    assert highest_latency < ACCEPTABLE_LATENCY
+
+
 class ConsumerResult(Enum):
     CONNECT_FAILED = 0
     RESOURCE_ALLOCATION_FAILED = 1
@@ -1806,10 +1937,10 @@ class ResourceType(Enum):
 CONNECT_TIMEOUT = 0.25
 
 
-class ConsumerProcess(multiprocessing.Process):
+class ConsumerProcess(spawn_mp.Process):
     def __init__(self, domain_addr, tls_cert, resource_type, resource_count,
                  result_queue):
-        multiprocessing.Process.__init__(self)
+        spawn_mp.Process.__init__(self)
         self.domain_addr = domain_addr
         self.tls_cert = tls_cert
         self.resource_type = resource_type
@@ -1908,7 +2039,7 @@ def spawn_consumer(domain_addr, tls_cert, resource_type, max_attempts,
 
 def spawn_consumers(domain_addr, tls_cert, resource_type, limit,
                     failure_result):
-    result_queue = multiprocessing.Queue()
+    result_queue = spawn_mp.Queue()
     consumers = []
     attempts = 0
     while attempts < limit:
@@ -2061,7 +2192,7 @@ def test_unsupported_protocol_version(server):
 
 
 def run_leak_clients(domain_addr, num):
-    ready_queue = multiprocessing.Queue()
+    ready_queue = spawn_mp.Queue()
     processes = []
     for i in range(num):
         unpublish = bool(random.getrandbits(1))

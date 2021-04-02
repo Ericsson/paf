@@ -649,11 +649,7 @@ class Server:
         self.close_server_socks()
 
     def check_orphans(self, change_type, service):
-        if (change_type == sd.ChangeType.ADDED and service.is_orphan()) or \
-           (change_type == sd.ChangeType.MODIFIED and
-            (service.is_orphan() or service.was_orphan())) or \
-           (change_type == sd.ChangeType.REMOVED and service.was_orphan()):
-            self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
+        self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
 
 
 def create(addrs, max_user_resources, max_total_resources, event_loop):

@@ -2,9 +2,10 @@
 # Copyright(c) 2020 Ericsson AB
 
 
+import collections
+import copy
 import enum
 import time
-import copy
 
 
 class Error(Exception):
@@ -300,6 +301,41 @@ for name in GENERATION_FIELD_NAMES:
                             setattr(self.next, name, value)))
 
 
+class TimeoutQueue:
+    def __init__(self):
+        self.queue = collections.deque()
+
+    def empty(self):
+        return len(self.queue) == 0
+
+    def add(self, new_timeout_id, new_timeout_value):
+        for i in range(len(self.queue) - 1, -1, -1):
+            timeout_id, timeout_value = self.queue[i]
+            if new_timeout_value >= timeout_value:
+                self.queue.insert(i + 1, (new_timeout_id, new_timeout_value))
+                return
+        self.queue.appendleft((new_timeout_id, new_timeout_value))
+
+    def update(self, timeout_id, new_timeout_value):
+        self.remove(timeout_id)
+        self.add(timeout_id, new_timeout_value)
+
+    def remove(self, target_timeout_id):
+        for i, (timeout_id, timeout_value) in enumerate(self.queue):
+            if timeout_id == target_timeout_id:
+                del self.queue[i]
+                return
+
+    def next_timeout(self):
+        if self.empty():
+            return None
+        timeout_id, timeout_value = self.queue[0]
+        return timeout_value
+
+    def __iter__(self):
+        return iter(self.queue)
+
+
 class ServiceDiscovery:
     def __init__(self, max_user_resources, max_total_resources,
                  service_change_cb=None):
@@ -309,6 +345,7 @@ class ServiceDiscovery:
         self.subscriptions = {}
         self.clients = {}
         self.service_change_cb = service_change_cb
+        self.orphans = TimeoutQueue()
 
     def client_connect(self, client_id, user_id):
         if client_id in self.clients:
@@ -384,21 +421,17 @@ class ServiceDiscovery:
 
     def purge_orphans(self):
         now = time.time()
-        timed_out = set()
-        for service in self.services.values():
-            if service.is_orphan() and now > service.orphan_timeout():
-                timed_out.add(service.service_id)
+        timed_out = []
+        for orphan_id, orphan_timeout in self.orphans:
+            if orphan_timeout > now:
+                break
+            timed_out.append(orphan_id)
         for orphan_id in timed_out:
             self._unpublish(orphan_id)
         return timed_out
 
     def next_orphan_timeout(self):
-        candidate = None
-        for service in self.services.values():
-            if service.is_orphan():
-                if candidate is None or service.orphan_timeout() < candidate:
-                    candidate = service.orphan_timeout()
-        return candidate
+        return self.orphans.next_timeout()
 
     def _unpublish(self, service_id):
         service = self.services.pop(service_id)
@@ -469,8 +502,30 @@ class ServiceDiscovery:
         subscription.check_access(client_id)
         self._remove_subscription(subscription)
 
-    def _service_commit(self, change_type, service):
+    def _maintain_orphans(self, change, service):
+        if change == ChangeType.ADDED and service.is_orphan():
+            self.orphans.add(service.service_id, service.orphan_timeout())
+        elif change == ChangeType.MODIFIED:
+            is_orphan = service.is_orphan()
+            was_orphan = service.was_orphan()
+            if was_orphan and not is_orphan:
+                self.orphans.remove(service.service_id)
+            elif not was_orphan and is_orphan:
+                self.orphans.add(service.service_id,
+                                 service.orphan_timeout())
+            elif was_orphan and is_orphan:
+                cur_timeout = service.orphan_timeout()
+                prev_timeout = service.had_orphan_timeout()
+                if cur_timeout != prev_timeout:
+                    self.orphans.update(service.service_id, cur_timeout)
+        elif change == ChangeType.REMOVED and service.was_orphan():
+            self.orphans.remove(service.service_id)
+
+    def _service_commit(self, change, service):
         for subscription in self.subscriptions.values():
-            subscription.notify(change_type, service)
+            subscription.notify(change, service)
+
+        self._maintain_orphans(change, service)
+
         if self.service_change_cb is not None:
-            self.service_change_cb(change_type, service)
+            self.service_change_cb(change, service)
