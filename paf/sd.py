@@ -143,25 +143,27 @@ class Subscription:
         self.user_id = user_id
         self.match_cb = match_cb
 
-    def notify(self, change_type, before, after):
+    def notify(self, change_type, service):
         if change_type == ChangeType.ADDED:
-            if self.matches(after):
-                self.match_cb(self.sub_id, MatchType.APPEARED, after)
+            if self.matches(service.props()):
+                self.match_cb(self.sub_id, MatchType.APPEARED, service)
         elif change_type == ChangeType.MODIFIED:
+            before = service.had_props()
+            after = service.props()
             if self.matches(before) and self.matches(after):
-                self.match_cb(self.sub_id, MatchType.MODIFIED, after)
+                self.match_cb(self.sub_id, MatchType.MODIFIED, service)
             elif not self.matches(before) and self.matches(after):
-                self.match_cb(self.sub_id, MatchType.APPEARED, after)
+                self.match_cb(self.sub_id, MatchType.APPEARED, service)
             elif self.matches(before) and not self.matches(after):
-                self.match_cb(self.sub_id, MatchType.DISAPPEARED, before)
+                self.match_cb(self.sub_id, MatchType.DISAPPEARED, service)
         elif change_type == ChangeType.REMOVED:
-            if self.matches(before):
-                self.match_cb(self.sub_id, MatchType.DISAPPEARED, before)
+            if self.matches(service.had_props()):
+                self.match_cb(self.sub_id, MatchType.DISAPPEARED, service)
 
-    def matches(self, service):
+    def matches(self, props):
         if self.filter is None:
             return True
-        return self.filter.match(service.props)
+        return self.filter.match(props)
 
     def check_access(self, client_id):
         if client_id != self.client_id:
@@ -170,54 +172,132 @@ class Subscription:
                                   (client_id, self.client_id))
 
 
+GENERATION_FIELD_NAMES = \
+    ('generation', 'props', 'ttl', 'orphan_since', 'client_id', 'user_id')
+
+
+class Generation:
+    def __init__(self):
+        pass
+
+    def is_consistent(self):
+        for name in GENERATION_FIELD_NAMES:
+            if not hasattr(self, name):
+                return False
+        return True
+
+    def copy(self):
+        return copy.copy(self)
+
+
+def assure_allowed(fun, allowed_change_types):
+    def assure_wrap(self, *args, **kwargs):
+        assert self.change in allowed_change_types
+        return fun(self, *args, **kwargs)
+    return assure_wrap
+
+
+def assure_changing(fun):
+    return assure_allowed(fun, (ChangeType.ADDED, ChangeType.MODIFIED,
+                                ChangeType.REMOVED))
+
+
+def assure_writable(fun):
+    return assure_allowed(fun, (ChangeType.ADDED, ChangeType.MODIFIED))
+
+
+def assure_not_changing(fun):
+    return assure_allowed(fun, (None,))
+
+
 class Service:
-    def __init__(self, service_id, generation, props, ttl, orphan_since,
-                 client_id, user_id, change_cb):
+    def __init__(self, service_id, change_cb):
         self.service_id = service_id
-        self.generation = generation
-        self.props = props
-        self.ttl = ttl
-        self.orphan_since = orphan_since
-        self.client_id = client_id
-        self.user_id = user_id
-        self.before = None
+        self.prev = None
+        self.cur = None
+        self.next = None
+        self.change = None
         self.change_cb = change_cb
 
+    def has_prev_generation(self):
+        return self.prev is not None
+
     def is_orphan(self):
-        return self.orphan_since is not None
+        return self.orphan_since() is not None
 
     def make_orphan(self, now):
-        self.orphan_since = now
+        self.set_orphan_since(now)
 
     def adopted(self):
-        self.orphan_since = None
+        self.set_orphan_since(None)
 
     def orphan_timeout(self):
-        return self.orphan_since + self.ttl
+        return self.orphan_since() + self.ttl()
 
-    def prepare(self):
-        self.before = Service(self.service_id, self.generation,
-                              copy.deepcopy(self.props), self.ttl,
-                              self.orphan_since, self.client_id,
-                              self.user_id, None)
+    def was_orphan(self):
+        return self.had_orphan_since() is not None
 
-    def commit(self, change_type):
-        if change_type == ChangeType.ADDED:
-            before = None
-            after = self
-        elif change_type == ChangeType.MODIFIED:
-            assert self.before is not None
-            before = self.before
-            after = self
-        elif change_type == ChangeType.REMOVED:
-            before = self
-            after = None
-        self.change_cb(change_type, before, after)
+    @assure_not_changing
+    def add(self):
+        self.change = ChangeType.ADDED
+        self.next = Generation()
+        return self
+
+    @assure_not_changing
+    def modify(self):
+        self.change = ChangeType.MODIFIED
+        self.next = self.cur.copy()
+        return self
+
+    @assure_not_changing
+    def remove(self):
+        self.change = ChangeType.REMOVED
+        return self
+
+    @assure_changing
+    def commit(self):
+        if self.change == ChangeType.ADDED or \
+           self.change == ChangeType.MODIFIED:
+            assert self.next.is_consistent()
+        self.prev = self.cur
+        self.cur = self.next
+        self.next = None
+        change = self.change
+        self.change = None
+
+        self.change_cb(change, self)
+
+    @assure_changing
+    def rollback(self):
+        self.change = None
+        self.next = None
+
+    def __enter__(self):
+        assert self.change is not None
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if exc_value is None:
+            self.commit()
+        else:
+            self.rollback()
 
     def check_access(self, user_id):
-        if user_id != self.user_id:
+        if user_id != self.user_id():
             raise PermissionError("user id %s may not changed service owned "
                                   "by user id %s" % (user_id, self.user_id))
+
+
+for name in GENERATION_FIELD_NAMES:
+    setattr(Service, "%s" % name,
+            lambda self, name=name: getattr(self.cur, name))
+
+    setattr(Service, "had_%s" % name,
+            lambda self, name=name: getattr(self.prev, name))
+
+    setattr(Service, "set_%s" % name,
+            assure_writable(lambda self, value, name=name:
+                            setattr(self.next, name, value)))
 
 
 class ServiceDiscovery:
@@ -244,9 +324,8 @@ class ServiceDiscovery:
         self.resource_manager.deallocate(user_id, ResourceType.CLIENT)
         now = time.time()
         for service in self.get_services_with_client_id(client_id):
-            service.prepare()
-            service.make_orphan(now)
-            service.commit(ChangeType.MODIFIED)
+            with service.modify():
+                service.make_orphan(now)
         client_subscriptions = \
             list(self.get_subscriptions_with_client_id(client_id))
         for subscription in client_subscriptions:
@@ -267,37 +346,40 @@ class ServiceDiscovery:
         if service_id in self.services:
             service = self.services[service_id]
             service.check_access(user_id)
-            if generation == service.generation:
-                if service.client_id != client_id or service.is_orphan():
+            if generation == service.generation():
+                if service.client_id() != client_id or service.is_orphan():
                     # owner comes back - with new or reused client id
-                    service.prepare()
-                    # The client id is allowed to change (though you might
-                    # argue against this permissive behavior), however the
-                    # assumption is that the user stays the same, so no
-                    # need to transfer resource tokens.
-                    service.client_id = client_id
-                    service.adopted()
-                    service.commit(ChangeType.MODIFIED)
+                    with service.modify():
+                        # The client id is allowed to change (though you might
+                        # argue against this permissive behavior), however the
+                        # assumption is that the user stays the same, so no
+                        # need to transfer resource tokens.
+                        service.set_client_id(client_id)
+                        service.adopted()
                 return service
-            elif generation > service.generation:
-                service.prepare()
-                service.generation = generation
-                service.ttl = ttl
-                service.client_id = client_id
-                service.props = service_props
-                service.adopted()
-                service.commit(ChangeType.MODIFIED)
+            elif generation > service.generation():
+                with service.modify():
+                    service.set_generation(generation)
+                    service.set_props(service_props)
+                    service.set_ttl(ttl)
+                    service.adopted()
+                    service.set_client_id(client_id)
                 return service
             else:
                 raise GenerationError("invalid generation %d: existing "
                                       "service already at generation %d" %
-                                      (generation, service.generation))
+                                      (generation, service.generation()))
         else:
             self.resource_manager.allocate(user_id, ResourceType.SERVICE)
-            service = Service(service_id, generation, service_props, ttl,
-                              None, client_id, user_id, self._service_commit)
-            self.services[service_id] = service
-            service.commit(ChangeType.ADDED)
+            service = Service(service_id, self._service_commit)
+            with service.add():
+                service.set_generation(generation)
+                service.set_props(service_props)
+                service.set_ttl(ttl)
+                service.set_client_id(client_id)
+                service.adopted()
+                service.set_user_id(user_id)
+                self.services[service_id] = service
             return service
 
     def purge_orphans(self):
@@ -320,8 +402,9 @@ class ServiceDiscovery:
 
     def _unpublish(self, service_id):
         service = self.services.pop(service_id)
-        self.resource_manager.deallocate(service.user_id, ResourceType.SERVICE)
-        service.commit(ChangeType.REMOVED)
+        with service.remove():
+            self.resource_manager.deallocate(service.user_id(),
+                                             ResourceType.SERVICE)
 
     def unpublish(self, service_id, client_id):
         user_id = self._get_user_id(client_id)
@@ -345,7 +428,7 @@ class ServiceDiscovery:
 
     def get_services_with_client_id(self, client_id):
         for service in self.services.values():
-            if service.client_id == client_id:
+            if service.client_id() == client_id:
                 yield service
 
     def create_subscription(self, sub_id, filter, client_id, match_cb):
@@ -360,7 +443,7 @@ class ServiceDiscovery:
     def activate_subscription(self, sub_id):
         subscription = self.subscriptions[sub_id]
         for service in self.services.values():
-            subscription.notify(ChangeType.ADDED, None, service)
+            subscription.notify(ChangeType.ADDED, service)
 
     def get_subscription(self, sub_id):
         return self.subscriptions[sub_id]
@@ -386,8 +469,8 @@ class ServiceDiscovery:
         subscription.check_access(client_id)
         self._remove_subscription(subscription)
 
-    def _service_commit(self, change_type, before, after):
+    def _service_commit(self, change_type, service):
         for subscription in self.subscriptions.values():
-            subscription.notify(change_type, before, after)
+            subscription.notify(change_type, service)
         if self.service_change_cb is not None:
-            self.service_change_cb(change_type, before, after)
+            self.service_change_cb(change_type, service)

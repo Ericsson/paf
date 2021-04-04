@@ -388,11 +388,11 @@ class Connection:
                            LogCategory.CORE)
             yield ta.accept()
             for service in self.sd.get_services():
-                if filter is None or filter.match(service.props):
-                    yield ta.notify(service.service_id, service.generation,
-                                    service.props, service.ttl,
-                                    service.client_id,
-                                    orphan_since=service.orphan_since)
+                if filter is None or filter.match(service.props()):
+                    yield ta.notify(service.service_id, service.generation(),
+                                    service.props(), service.ttl(),
+                                    service.client_id(),
+                                    orphan_since=service.orphan_since())
             yield ta.complete()
         except paf.filter.ParseError as e:
             self.info("Received list services request with malformed "
@@ -403,7 +403,7 @@ class Connection:
         try:
             service = self.sd.publish(service_id, generation, service_props,
                                       ttl, self.client_id)
-            if service.before is None:
+            if not service.has_prev_generation():
                 self.debug("Published new service with id %x, generation %d, "
                            "props %s and TTL %d s." %
                            (service_id, generation,
@@ -412,20 +412,20 @@ class Connection:
             else:
                 log_msg = "Re-published service with id %x. " \
                     "Generation %d -> %d." \
-                    % (service_id, service.before.generation,
-                       service.generation)
-                if service.before.is_orphan():
+                    % (service_id, service.had_generation(),
+                       service.generation())
+                if service.was_orphan():
                     log_msg += " Replacing orphan."
-                if service.props != service.before.props:
+                if service.props() != service.had_props():
                     log_msg += " Properties changed from %s to %s." \
-                               % (props.to_str(service.before.props),
-                                  props.to_str(service.props))
-                if service.ttl != service.before.ttl:
+                               % (props.to_str(service.had_props()),
+                                  props.to_str(service.props()))
+                if service.ttl() != service.had_ttl():
                     log_msg += " TTL changed from %d to %d s." \
-                               % (service.before.ttl, service.ttl)
-                if service.client_id != service.before.client_id:
+                               % (service.had_ttl(), service.ttl())
+                if service.client_id() != service.had_client_id():
                     log_msg += " Owner is changed from %x to %x." \
-                               % (service.before.client_id, service.client_id)
+                               % (service.had_client_id(), service.client_id())
                 self.debug(log_msg, LogCategory.CORE)
             yield ta.complete()
         except sd.PermissionError as e:
@@ -443,7 +443,7 @@ class Connection:
 
     def unpublish_request(self, ta, service_id):
         try:
-            service_props = self.sd.get_service(service_id).props
+            service_props = self.sd.get_service(service_id).props()
             self.sd.unpublish(service_id, self.client_id)
             self.debug("Unpublished service %s with service id %x." %
                        (props.to_str(service_props), service_id),
@@ -476,10 +476,14 @@ class Connection:
             filter_s = "with filter %s" % subscription.filter
         else:
             filter_s = "without filter"
+        if match_type == sd.MatchType.DISAPPEARED:
+            service_props = service.had_props()
+        else:
+            service_props = service.props()
         self.debug("Subscription id %d %s received %s event by "
                    "service id %x with properties %s." %
                    (sub_id, filter_s, match_type.name,
-                    service.service_id, props.to_str(service.props)),
+                    service.service_id, props.to_str(service_props)),
                    LogCategory.CORE)
         proto_match_type = getattr(proto, "MATCH_TYPE_%s" %
                                    match_type.name)
@@ -488,11 +492,11 @@ class Connection:
             self.respond(ta.notify(proto_match_type, service.service_id))
         else:
             self.respond(ta.notify(proto_match_type, service.service_id,
-                                   generation=service.generation,
-                                   service_props=service.props,
-                                   ttl=service.ttl,
-                                   client_id=service.client_id,
-                                   orphan_since=service.orphan_since))
+                                   generation=service.generation(),
+                                   service_props=service.props(),
+                                   ttl=service.ttl(),
+                                   client_id=service.client_id(),
+                                   orphan_since=service.orphan_since()))
 
     def respond(self, out_wire_msg):
         self.out_wire_msgs.append(out_wire_msg)
@@ -644,9 +648,11 @@ class Server:
             self.event_loop.remove(stream)
         self.close_server_socks()
 
-    def check_orphans(self, change_type, after, before):
-        if (after is not None and after.is_orphan()) or \
-           (before is not None and before.is_orphan()):
+    def check_orphans(self, change_type, service):
+        if (change_type == sd.ChangeType.ADDED and service.is_orphan()) or \
+           (change_type == sd.ChangeType.MODIFIED and
+            (service.is_orphan() or service.was_orphan())) or \
+           (change_type == sd.ChangeType.REMOVED and service.was_orphan()):
             self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
 
 
