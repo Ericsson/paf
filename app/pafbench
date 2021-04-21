@@ -36,60 +36,54 @@ class EventCounter:
         return len(self.events) == self.target
 
 
+MAX_BATCH_SIZE = 1024
+
+def batch_op(start_num, count, op, done_event):
+    completed = 0
+    while completed < count:
+        left = count - completed
+        batch_size = min(MAX_BATCH_SIZE, left)
+
+        counter = EventCounter(done_event, batch_size)
+
+        for i in range(batch_size):
+            op(start_num + completed + i, counter)
+
+        wait_for(conn, counter.done)
+
+        completed += batch_size
+
 def subscribe(conn, start_num, count):
-    subscription_counter = EventCounter(client.EventType.ACCEPT,
-                                        count)
-    for num in range(start_num, start_num+count):
-        sub_id = num
-        conn.subscribe(sub_id, subscription_counter,
-                       filter="(name=service-%d)" % num)
-
-    wait_for(conn, subscription_counter.done)
-
+    def subscribe_op(i, cb):
+        conn.subscribe(i, cb, filter="(name=service-%d)" % i)
+    batch_op(start_num, count, subscribe_op, client.EventType.ACCEPT)
 
 def unsubscribe(conn, start_num, count):
-    unsubscription_counter = EventCounter(client.EventType.COMPLETE,
-                                          count)
-    for num in range(start_num, start_num+count):
-        sub_id = num
-        conn.unsubscribe(sub_id, unsubscription_counter)
-
-    wait_for(conn, unsubscription_counter.done)
-
+    def unsubscribe_op(i, cb):
+        conn.unsubscribe(i, cb)
+    batch_op(start_num, count, unsubscribe_op, client.EventType.COMPLETE)
 
 def publish(conn, start_num, count):
-    publish_counter = EventCounter(client.EventType.COMPLETE,
-                                   count)
     ttl = 1
     generation = 0
-    for num in range(start_num, start_num+count):
-        service_id = num
+    def publish_op(i, cb):
+        service_id = i
         conn.publish(service_id, generation, {
-            "name": {"service-%d" % num},
+            "name": {"service-%d" % i},
             "addr": {"tls:10.10.10.10:4711"},
             "color": {"green"}
-            }, ttl, publish_counter)
-
-    wait_for(conn, publish_counter.done)
-
+        }, ttl, cb)
+    batch_op(start_num, count, publish_op, client.EventType.COMPLETE)
 
 def unpublish(conn, start_num, count):
-    unpublish_counter = EventCounter(client.EventType.COMPLETE,
-                                     count)
-    for num in range(start_num, start_num+count):
-        service_id = num
-        conn.unpublish(service_id, unpublish_counter)
-
-    wait_for(conn, unpublish_counter.done)
-
+    def unpublish_op(i, cb):
+        conn.unpublish(i, cb)
+    batch_op(start_num, count, unpublish_op, client.EventType.COMPLETE)
 
 def ping(conn, count):
-    ping_counter = EventCounter(client.EventType.COMPLETE, count)
-    for i in range(0, count):
-        conn.ping(ping_counter)
-
-    wait_for(conn, ping_counter.done)
-
+    def ping_op(i, cb):
+        conn.ping(cb)
+    batch_op(0, count, ping_op, client.EventType.COMPLETE)
 
 def pre_populate(conn, num_services, num_subscriptions):
     subscribe(conn, 0, num_subscriptions)
