@@ -36,7 +36,7 @@ test/cert/ca/ca-cert.pem: test/cert/cert.conf
 	mkdir -p test/cert/ca
 	openssl req \
 		-x509 -newkey rsa:4096 -keyout test/cert/ca/ca-key.pem \
-		-sha256 -days 1000 -nodes -subj '/CN=localhost' \
+		-sha256 -days 1000 -nodes -subj '/CN=localhost CA' \
 		-out test/cert/ca/ca-cert.pem
 
 define cert_template
