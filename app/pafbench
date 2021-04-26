@@ -38,6 +38,7 @@ class EventCounter:
 
 MAX_BATCH_SIZE = 1024
 
+
 def batch_op(start_num, count, op, done_event):
     completed = 0
     while completed < count:
@@ -53,19 +54,23 @@ def batch_op(start_num, count, op, done_event):
 
         completed += batch_size
 
+
 def subscribe(conn, start_num, count):
     def subscribe_op(i, cb):
         conn.subscribe(i, cb, filter="(name=service-%d)" % i)
     batch_op(start_num, count, subscribe_op, client.EventType.ACCEPT)
+
 
 def unsubscribe(conn, start_num, count):
     def unsubscribe_op(i, cb):
         conn.unsubscribe(i, cb)
     batch_op(start_num, count, unsubscribe_op, client.EventType.COMPLETE)
 
+
 def publish(conn, start_num, count):
     ttl = 1
     generation = 0
+
     def publish_op(i, cb):
         service_id = i
         conn.publish(service_id, generation, {
@@ -73,17 +78,21 @@ def publish(conn, start_num, count):
             "addr": {"tls:10.10.10.10:4711"},
             "color": {"green"}
         }, ttl, cb)
+
     batch_op(start_num, count, publish_op, client.EventType.COMPLETE)
+
 
 def unpublish(conn, start_num, count):
     def unpublish_op(i, cb):
         conn.unpublish(i, cb)
     batch_op(start_num, count, unpublish_op, client.EventType.COMPLETE)
 
+
 def ping(conn, count):
     def ping_op(i, cb):
         conn.ping(cb)
     batch_op(0, count, ping_op, client.EventType.COMPLETE)
+
 
 def pre_populate(conn, num_services, num_subscriptions):
     subscribe(conn, 0, num_subscriptions)
