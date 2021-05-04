@@ -1086,8 +1086,8 @@ def test_unsubscribe_from_non_owner(server):
     delayed_close(conn1)
 
 
-def by_id(l):
-    return l[0]
+def by_id(keys):
+    return keys[0]
 
 
 NUM_CLIENTS = 10

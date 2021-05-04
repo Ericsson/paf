@@ -86,7 +86,7 @@ class Transaction:
         if ta_cmd != self.ta_type.cmd:
             raise ProtocolError("Received message in transaction %d; expected "
                                 "\"%s\" command, but got \"%s\"." %
-                                (self.ta_type.cmd, ta_cmd))
+                                (self.ta_id, self.ta_type.cmd, ta_cmd))
 
         msg_type = proto.FIELD_MSG_TYPE.pull(in_msg)
 
