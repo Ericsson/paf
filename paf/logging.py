@@ -41,16 +41,16 @@ def _extra(category):
 
 
 def debug(msg, category):
-    logger.debug(msg, _extra(category))
+    logger.debug(msg, extra=_extra(category))
 
 
 def info(msg, category):
-    logger.info(msg, _extra(category))
+    logger.info(msg, extra=_extra(category))
 
 
 def warning(msg, category):
-    logger.warning(msg, _extra(category))
+    logger.warning(msg, extra=_extra(category))
 
 
 def exception(msg):
-    logger.exception(_extra(LogCategory.INTERNAL))
+    logger.exception(msg, extra=_extra(LogCategory.INTERNAL))
