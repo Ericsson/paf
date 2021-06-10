@@ -212,11 +212,19 @@ class CompleteCall(Call):
         return self.complete
 
 
+class ServerConf:
+    def __init__(self, addr):
+        self.addr = addr
+        self.attrs = {}
+
+
 class Client:
-    def __init__(self, client_id, addr, ready_cb):
+    def __init__(self, client_id, server_conf, ready_cb):
         self.client_id = client_id
         try:
-            self.conn_sock = xcm.connect(addr, xcm.NONBLOCK)
+            attrs = {'xcm.blocking': False}
+            attrs.update(server_conf.attrs)
+            self.conn_sock = xcm.connect(server_conf.addr, attrs=attrs)
         except xcm.error as e:
             raise TransportError(str(e))
         self.ready_cb = ready_cb
@@ -350,7 +358,7 @@ class Client:
         condition = xcm.SO_RECEIVABLE
         if len(self.out_wire_msgs) > 0:
             condition |= xcm.SO_SENDABLE
-        self.conn_sock.update(condition)
+        self.conn_sock.set_target(condition)
 
     def process(self):
         for i in range(0, MAX_MSGS_PER_ROUND):
@@ -405,31 +413,69 @@ class Client:
 
 DOMAINS_ENV = 'PAF_DOMAINS'
 DEFAULT_DOMAINS_DIR = '/run/paf/domains.d'
+DOMAIN_FILE_TO_XCM_ATTR = {
+    'tlsCertificateFile': 'tls.cert_file',
+    'tlsKeyFile': 'tls.key_file',
+    'tlsTrustedCaFile': 'tls.tc_file'
+}
 
 
-def domain_addrs(domain):
+def looks_like_json_object(s):
+    # see RFC 7159, section 2 for grammar
+    for c in s:
+        if c in ('\n', '\r', ' ', '\t'):
+            continue
+        if c == '{':
+            return True
+        return False
+    return False
+
+
+def parse_domain_json(data):
+    root = json.loads(data)
+    servers = []
+    for server_obj in root['servers']:
+        server = ServerConf(server_obj['address'])
+        for json_name, xcm_name in DOMAIN_FILE_TO_XCM_ATTR.items():
+            if json_name in server_obj:
+                server.attrs[xcm_name] = server_obj[json_name]
+        servers.append(server)
+    return servers
+
+
+def parse_domain_custom(data):
+    servers = []
+    for line in data.split('\n'):
+        addr = line.strip()
+        if len(addr) == 0 or addr[0] == '#':
+            continue
+        servers.append(ServerConf(addr))
+    return servers
+
+
+def read_domain(domain):
     domains_dir = DEFAULT_DOMAINS_DIR
     if DOMAINS_ENV in os.environ:
         domains_dir = os.environ[DOMAINS_ENV]
     domains_file = "%s/%s" % (domains_dir, domain)
+
     try:
-        addrs = []
-        for line in open(domains_file):
-            addr = line.strip()
-            if addr[0] == '#':
-                continue
-            addrs.append(addr)
-        return addrs
+        domains_data = open(domains_file).read()
     except IOError:
         return []
 
-
-def domain_addr(domain):
-    addrs = domain_addrs(domain)
-    if len(addrs) > 0:
-        return addrs[0]
+    if looks_like_json_object(domains_data):
+        return parse_domain_json(domains_data)
     else:
-        return None
+        return parse_domain_custom(domains_data)
+
+
+def domain_server(domain):
+    servers = read_domain(domain)
+    if len(servers) > 0:
+        return servers[0]
+    else:
+        return ServerConf(domain)
 
 
 def allocate_client_id():
@@ -437,9 +483,7 @@ def allocate_client_id():
 
 
 def connect(domain_or_addr, client_id=None, ready_cb=None):
-    addr = domain_addr(domain_or_addr)
-    if addr is None:
-        addr = domain_or_addr
+    server = domain_server(domain_or_addr)
     if client_id is None:
         client_id = allocate_client_id()
-    return Client(client_id, addr, ready_cb)
+    return Client(client_id, server, ready_cb)

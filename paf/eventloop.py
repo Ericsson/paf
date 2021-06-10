@@ -79,7 +79,7 @@ class XcmSource (Source):
         self.set_fd(xcm_sock.fileno(), select.EPOLLIN)
 
     def update(self, condition):
-        self.xcm_sock.update(condition)
+        self.xcm_sock.set_target(condition)
 
 
 EPOLL_MAX_TIMEOUT = (((1 << 31)-1)/1000)

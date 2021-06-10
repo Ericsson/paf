@@ -88,7 +88,10 @@ configuration file is used, and also for running the test cases, the
 
 In addition, the Pathfinder server depends on Extensible
 Connection-oriented Messaging (XCM), in the form of the `libxcm`
-shared library. XCM API version must be 0.13 or later.
+shared library. The minimum XCM API/ABI version is 0.15 (XCM
+v1.1.0). In case 'pafc' or 'paf.client' are used in combination with
+per-server TLS certificate file configuration, XCM API/ABI 0.16 (XCM
+v1.2.0) or later must be available.
 
 The Pathfinder server build uses Python setuptools.
 
