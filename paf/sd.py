@@ -168,7 +168,7 @@ class Subscription:
 
     def check_access(self, client_id):
         if client_id != self.client_id:
-            raise PermissionError("client id %s may not changed subscription "
+            raise PermissionError("client id %s may not change subscription "
                                   "owned by client id %s" %
                                   (client_id, self.client_id))
 
