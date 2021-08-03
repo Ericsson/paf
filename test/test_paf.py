@@ -676,8 +676,9 @@ def test_republish_same_generation_non_orphan_same_connection(server):
 
     assert subscription_recorder.count_notifications() == 1
 
-    conn.publish(service_id, service_generation, service_props, service_ttl)
-    conn.publish(service_id, service_generation, {}, service_ttl)
+    for i in range(10):
+        conn.publish(service_id, service_generation, service_props,
+                     service_ttl)
 
     wait(conn, timeout=0.1)
 
@@ -686,17 +687,15 @@ def test_republish_same_generation_non_orphan_same_connection(server):
     conn.close()
 
 
-@pytest.mark.fast
-def test_republish_same_and_older_generation(server):
+def run_failed_republish(server, first_generation, first_props, first_ttl,
+                         second_generation, second_props, second_ttl,
+                         expected_reason):
     conn = client.connect(server.random_domain().random_addr())
 
     service_id = conn.service_id()
-    service_generations = [10, 11]
-    service_props = {"name": {"foo"}}
-    service_ttl = 42
 
-    conn.publish(service_id, service_generations[1], service_props,
-                 service_ttl)
+    conn.publish(service_id, first_generation, first_props,
+                 first_ttl)
 
     subscription_recorder = MultiResponseRecorder()
     ta_id = conn.subscribe(17, subscription_recorder)
@@ -707,20 +706,60 @@ def test_republish_same_and_older_generation(server):
 
     assert subscription_recorder.count_notifications() == 1
 
-    conn.publish(service_id, service_generations[1], service_props,
-                 service_ttl)
+    conn.publish(service_id, first_generation, first_props,
+                 first_ttl)
 
     assert subscription_recorder.count_notifications() == 1
 
-    reason = proto.FAIL_REASON_OLD_GENERATION
-    with pytest.raises(client.TransactionError, match=".*%s.*" % reason):
-        service_props = {}
-        conn.publish(service_id, service_generations[0],
-                     service_props, service_ttl)
+    with pytest.raises(client.TransactionError,
+                       match=".*%s.*" % expected_reason):
+        conn.publish(service_id, second_generation,
+                     second_props, second_ttl)
 
     assert subscription_recorder.count_notifications() == 1
 
     conn.close()
+
+
+@pytest.mark.fast
+def test_republish_same_and_older_generation(server):
+    first_generation = 11
+    second_generation = 10
+    service_props = {"name": {"foo"}}
+    service_ttl = 42
+
+    run_failed_republish(server, first_generation, service_props,
+                         service_ttl, second_generation,
+                         service_props, service_ttl,
+                         proto.FAIL_REASON_OLD_GENERATION)
+
+
+@pytest.mark.fast
+def test_republish_same_generation_with_different_props(server):
+    return
+    generation = 11111111111
+    first_props = {"name": {"foo"}}
+    second_props = {"name": {"bar"}}
+    service_ttl = 42
+
+    run_failed_republish(server, generation, first_props,
+                         service_ttl, generation,
+                         second_props, service_ttl,
+                         proto.FAIL_REASON_SAME_GENERATION_BUT_DIFFERENT)
+
+
+@pytest.mark.fast
+def test_republish_same_generation_with_different_ttl(server):
+    return
+    generation = 11111111111
+    props = {"name": {"foo"}}
+    first_ttl = 42
+    second_ttl = 41
+
+    run_failed_republish(server, generation, props,
+                         first_ttl, generation,
+                         props, second_ttl,
+                         proto.FAIL_REASON_SAME_GENERATION_BUT_DIFFERENT)
 
 
 @pytest.mark.fast

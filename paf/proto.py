@@ -155,6 +155,7 @@ FAIL_REASON_NON_EXISTENT_SERVICE_ID = 'non-existent-service-id'
 FAIL_REASON_UNSUPPORTED_PROTOCOL_VERSION = 'unsupported-protocol-version'
 FAIL_REASON_PERMISSION_DENIED = 'permission-denied'
 FAIL_REASON_OLD_GENERATION = 'old-generation'
+FAIL_REASON_SAME_GENERATION_BUT_DIFFERENT = 'same-generation-but-different'
 FAIL_REASON_INSUFFICIENT_RESOURCES = 'insufficient-resources'
 
 

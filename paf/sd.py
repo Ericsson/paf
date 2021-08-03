@@ -23,6 +23,11 @@ class GenerationError(Error):
         Error.__init__(self, message)
 
 
+class SameGenerationButDifferentError(Error):
+    def __init__(self, message):
+        Error.__init__(self, message)
+
+
 class NotFoundError(Error):
     def __init__(self,  obj_type, obj_id):
         Error.__init__(self, "%s id %d not found" % (obj_type, obj_id))
@@ -384,6 +389,11 @@ class ServiceDiscovery:
             service = self.services[service_id]
             service.check_access(user_id)
             if generation == service.generation():
+                if service_props != service.props() or ttl != service.ttl():
+                    raise SameGenerationButDifferentError(
+                        "properties/TTL changed, but generation is left at "
+                        "%d" % generation
+                    )
                 if service.client_id() != client_id or service.is_orphan():
                     # owner comes back - with new or reused client id
                     with service.modify():

@@ -440,6 +440,12 @@ class Connection:
             self.warning("Error while re-publishing service %x: %s." %
                          (service_id, e), LogCategory.CORE)
             yield ta.fail(fail_reason=proto.FAIL_REASON_OLD_GENERATION)
+        except sd.SameGenerationButDifferentError as e:
+            self.warning("Error while re-publishing service %x: %s." %
+                         (service_id, e), LogCategory.CORE)
+            yield ta.fail(
+                fail_reason=proto.FAIL_REASON_SAME_GENERATION_BUT_DIFFERENT
+            )
 
     def unpublish_request(self, ta, service_id):
         try:
