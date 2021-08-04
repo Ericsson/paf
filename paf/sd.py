@@ -290,7 +290,7 @@ class Service:
 
     def check_access(self, user_id):
         if user_id != self.user_id():
-            raise PermissionError("user id %s may not changed service owned "
+            raise PermissionError("user id %s may not change service owned "
                                   "by user id %s" % (user_id, self.user_id))
 
 
