@@ -5,6 +5,11 @@
 Pathfinder is a light-weight service discovery system for embedded or
 cloud use.
 
+This repository contains the service-side implementation of the
+[Pathfinder
+protocol](https://github.com/Ericsson/paf/blob/master/doc/PROTOCOL.md)
+version 2.
+
 ## Technical Overview
 
 In a distributed system, such as a Radio Access Network (RAN) or a
@@ -51,8 +56,7 @@ producers reconnect to the new server instance.
 
 Both the Pathfinder server and the client shared library are memory
 and CPU resource efficient and designed specifically to allow embedded
-use (as well as use in the cloud). The C shared library is ~6 kLOC,
-and the Python server ~2 kLOC.
+use (as well as use in the cloud).
 
 Pathfinder has a single concern - service discovery - and no other
 functionality. It does imply or impose any consumer-producer
