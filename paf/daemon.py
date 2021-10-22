@@ -156,7 +156,7 @@ def main(argv):
     except getopt.GetoptError as e:
         early_error("Error parsning command line: %s." % e)
     except (paf.conf.Error, FileNotFoundError) as e:
-        early_error("Error reading configuration file: %s" % e)
+        early_error("Error reading configuration: %s" % e)
 
 
 if __name__ == "__main__":
