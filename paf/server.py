@@ -286,8 +286,8 @@ class Connection:
         if proto.VERSION >= min_version and proto.VERSION <= max_version:
             try:
                 self.sd.client_connect(self.client_id, user_id)
-                self.debug("Handshake producedure finished.",
-                           LogCategory.PROTOCOL)
+                self.debug("Handshake producedure finished for client from "
+                           "\"%s\"." % self.conn_addr, LogCategory.PROTOCOL)
                 self.handshaked = True
                 self.handshake_cb(self)
                 yield ta.complete(proto.VERSION)
