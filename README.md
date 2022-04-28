@@ -5,7 +5,7 @@
 Pathfinder is a light-weight service discovery system for embedded or
 cloud use.
 
-This repository contains the service-side implementation of the
+This repository contains the server-side implementation of the
 [Pathfinder
 protocol](https://github.com/Ericsson/paf/blob/master/doc/PROTOCOL.md)
 version 2.
