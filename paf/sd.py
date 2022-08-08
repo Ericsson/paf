@@ -154,7 +154,7 @@ class Subscription:
             if self.matches(service.props()):
                 self.match_cb(self.sub_id, MatchType.APPEARED, service)
         elif change_type == ChangeType.MODIFIED:
-            before = service.had_props()
+            before = service.prev_props()
             after = service.props()
             if self.matches(before) and self.matches(after):
                 self.match_cb(self.sub_id, MatchType.MODIFIED, service)
@@ -163,7 +163,7 @@ class Subscription:
             elif self.matches(before) and not self.matches(after):
                 self.match_cb(self.sub_id, MatchType.DISAPPEARED, service)
         elif change_type == ChangeType.REMOVED:
-            if self.matches(service.had_props()):
+            if self.matches(service.prev_props()):
                 self.match_cb(self.sub_id, MatchType.DISAPPEARED, service)
 
     def matches(self, props):
@@ -241,10 +241,10 @@ class Service:
         return self.orphan_since() + self.ttl()
 
     def was_orphan(self):
-        return self.had_orphan_since() is not None
+        return self.prev_orphan_since() is not None
 
-    def had_orphan_timeout(self):
-        return self.had_orphan_since() + self.had_ttl()
+    def prev_orphan_timeout(self):
+        return self.prev_orphan_since() + self.prev_ttl()
 
     @assure_not_changing
     def add(self):
@@ -301,7 +301,7 @@ for name in GENERATION_FIELD_NAMES:
     setattr(Service, "%s" % name,
             lambda self, name=name: getattr(self.cur, name))
 
-    setattr(Service, "had_%s" % name,
+    setattr(Service, "prev_%s" % name,
             lambda self, name=name: getattr(self.prev, name))
 
     setattr(Service, "set_%s" % name,
@@ -528,7 +528,7 @@ class ServiceDiscovery:
                                  service.orphan_timeout())
             elif was_orphan and is_orphan:
                 cur_timeout = service.orphan_timeout()
-                prev_timeout = service.had_orphan_timeout()
+                prev_timeout = service.prev_orphan_timeout()
                 if cur_timeout != prev_timeout:
                     self.orphans.update(service.service_id, cur_timeout)
         elif change == ChangeType.REMOVED and service.was_orphan():

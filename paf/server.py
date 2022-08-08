@@ -412,20 +412,21 @@ class Connection:
             else:
                 log_msg = "Re-published service with id %x. " \
                     "Generation %d -> %d." \
-                    % (service_id, service.had_generation(),
+                    % (service_id, service.prev_generation(),
                        service.generation())
                 if service.was_orphan():
                     log_msg += " Replacing orphan."
-                if service.props() != service.had_props():
+                if service.props() != service.prev_props():
                     log_msg += " Properties changed from %s to %s." \
-                               % (props.to_str(service.had_props()),
+                               % (props.to_str(service.prev_props()),
                                   props.to_str(service.props()))
-                if service.ttl() != service.had_ttl():
+                if service.ttl() != service.prev_ttl():
                     log_msg += " TTL changed from %d to %d s." \
-                               % (service.had_ttl(), service.ttl())
-                if service.client_id() != service.had_client_id():
+                               % (service.prev_ttl(), service.ttl())
+                if service.client_id() != service.prev_client_id():
                     log_msg += " Owner is changed from %x to %x." \
-                               % (service.had_client_id(), service.client_id())
+                               % (service.prev_client_id(),
+                                  service.client_id())
                 self.debug(log_msg, LogCategory.CORE)
             yield ta.complete()
         except sd.PermissionError as e:
@@ -483,7 +484,7 @@ class Connection:
         else:
             filter_s = "without filter"
         if match_type == sd.MatchType.DISAPPEARED:
-            service_props = service.had_props()
+            service_props = service.prev_props()
         else:
             service_props = service.props()
         self.debug("Subscription id %d %s received %s event by "
