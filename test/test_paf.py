@@ -645,6 +645,34 @@ def test_republish_same_generation_orphan_from_different_client(server):
 
 
 @pytest.mark.fast
+def test_reconnect_immediate_disconnect(server):
+    domain_addr = server.random_domain().random_addr()
+
+    client_id = client.allocate_client_id()
+    service_id = 4711
+    service_generation = 0
+    service_props = {"name": {"foo"}}
+    service_ttl = 42
+
+    conn = client.connect(domain_addr, client_id=client_id)
+    conn.publish(service_id, service_generation, service_props,
+                 service_ttl)
+
+    conn.close()
+
+    conn = client.connect(domain_addr, client_id=client_id)
+    conn.close()
+
+    conn = client.connect(domain_addr, client_id=client_id)
+    conn.publish(service_id, service_generation, service_props,
+                 service_ttl)
+    conn.close()
+
+    conn = client.connect(domain_addr)
+    conn.ping()
+
+
+@pytest.mark.fast
 def test_unpublish_nonexisting_service(server):
     conn = client.connect(server.random_domain().random_addr())
 

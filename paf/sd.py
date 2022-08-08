@@ -243,6 +243,9 @@ class Service:
     def was_orphan(self):
         return self.had_orphan_since() is not None
 
+    def had_orphan_timeout(self):
+        return self.had_orphan_since() + self.had_ttl()
+
     @assure_not_changing
     def add(self):
         self.change = ChangeType.ADDED
