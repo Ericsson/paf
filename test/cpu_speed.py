@@ -33,10 +33,10 @@ def relative_speed():
     return _relative_speed
 
 
-def adjust(num):
+def adjust(num, op):
     speed = relative_speed()
 
-    adjusted_num = num * speed
+    adjusted_num = op(num, speed)
 
     if isinstance(num, int):
         adjusted_num = int(adjusted_num)
@@ -44,7 +44,17 @@ def adjust(num):
     return adjusted_num
 
 
-def adjust_down(num):
-    adjusted_num = adjust(num)
+def adjust_latency(num):
+    return adjust(num, lambda num, speed: num / speed)
 
-    return min(num, adjusted_num)
+
+def adjust_latency_up(num):
+    return max(num, adjust_latency(num))
+
+
+def adjust_cardinality(num):
+    return adjust(num, lambda num, speed: num * speed)
+
+
+def adjust_cardinality_down(num):
+    return min(num, adjust_cardinality(num))

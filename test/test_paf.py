@@ -1399,7 +1399,7 @@ class ClientProcess(spawn_mp.Process):
 def test_survives_killed_clients(server):
     domain_addr = server.random_domain().random_addr()
 
-    num_clients = cpu_speed.adjust_down(MAX_CLIENTS - 1)
+    num_clients = cpu_speed.adjust_cardinality_down(MAX_CLIENTS - 1)
 
     ready_queue = spawn_mp.Queue()
     processes = []
@@ -1896,7 +1896,7 @@ def test_slow_client(server):
     for i in range(NUM_SLOW_CONN_REQS):
         slow_conn.services(response_cb=cb)
 
-    acceptable_latency = cpu_speed.adjust(ACCEPTABLE_LATENCY)
+    acceptable_latency = cpu_speed.adjust_latency(ACCEPTABLE_LATENCY)
     assure_ping(fast_conn, acceptable_latency)
 
     # make sure to fill up the server's socket buffer facing the slow client
@@ -1956,7 +1956,7 @@ def test_large_client_disconnect(server):
     pub_conn = client.connect(domain_addr)
     sub_conn = client.connect(domain_addr)
 
-    num_services = cpu_speed.adjust_down(MANY_SERVICES)
+    num_services = cpu_speed.adjust_cardinality_down(MANY_SERVICES)
 
     for i in range(num_services):
         service_props = {
@@ -1991,7 +1991,7 @@ def test_large_client_disconnect(server):
 
     sub_conn.close()
 
-    assert highest_latency < cpu_speed.adjust(ACCEPTABLE_LATENCY)
+    assert highest_latency < cpu_speed.adjust_latency(ACCEPTABLE_LATENCY)
 
 
 class ConsumerResult(Enum):
