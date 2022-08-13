@@ -22,6 +22,7 @@ import collections
 import multiprocessing
 import yaml
 import queue
+import cpu_speed
 
 import paf.client as client
 import paf.proto as proto
@@ -1398,7 +1399,8 @@ class ClientProcess(spawn_mp.Process):
 def test_survives_killed_clients(server):
     domain_addr = server.random_domain().random_addr()
 
-    num_clients = MAX_CLIENTS-1
+    num_clients = cpu_speed.adjust_down(MAX_CLIENTS - 1)
+
     ready_queue = spawn_mp.Queue()
     processes = []
     for i in range(num_clients):
@@ -1894,14 +1896,15 @@ def test_slow_client(server):
     for i in range(NUM_SLOW_CONN_REQS):
         slow_conn.services(response_cb=cb)
 
-    assure_ping(fast_conn, ACCEPTABLE_LATENCY)
+    acceptable_latency = cpu_speed.adjust(ACCEPTABLE_LATENCY)
+    assure_ping(fast_conn, acceptable_latency)
 
     # make sure to fill up the server's socket buffer facing the slow client
     deadline = time.time() + 0.25
     while time.time() < deadline:
         slow_conn.try_send()
 
-    assure_ping(fast_conn, ACCEPTABLE_LATENCY)
+    assure_ping(fast_conn, acceptable_latency)
 
     assert len(replies) == 0
 
@@ -1953,7 +1956,9 @@ def test_large_client_disconnect(server):
     pub_conn = client.connect(domain_addr)
     sub_conn = client.connect(domain_addr)
 
-    for i in range(MANY_SERVICES):
+    num_services = cpu_speed.adjust_down(MANY_SERVICES)
+
+    for i in range(num_services):
         service_props = {
             "name": {"service-%d" % i},
             "value": {0}
@@ -1986,7 +1991,7 @@ def test_large_client_disconnect(server):
 
     sub_conn.close()
 
-    assert highest_latency < ACCEPTABLE_LATENCY
+    assert highest_latency < cpu_speed.adjust(ACCEPTABLE_LATENCY)
 
 
 class ConsumerResult(Enum):
