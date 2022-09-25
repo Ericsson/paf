@@ -14,7 +14,8 @@ from paf.logging import LogCategory, info, exception
 
 def usage(name):
     print("Usage:")
-    print("%s [-s] [-l <level>] [-y <facility>] [-c <max-clients>]" % name)
+    print("%s [-s] [-l <level>] [-y <facility>] [-c <max-clients>] "
+          "[-f <conf-file>]" % name)
     print("%s [-m <addr0>+...+<addrN>] [<domain-addr> ...]" %
           (len(name) * " "))
     print("%s -h" % name)
@@ -34,6 +35,7 @@ def usage(name):
           "connected clients")
     print("                          to <max-clients>. The default "
           "is no limit.")
+    print("  -f <conf-file>          Read configuration from <conf-file>.")
     print("  -h                      Print this text.")
 
 
