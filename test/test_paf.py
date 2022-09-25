@@ -254,28 +254,28 @@ def random_server(min_domains, max_domains, min_addrs_per_domain,
     return server
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def server():
     server = random_server(1, 4, 1, 4)
     yield server
     server.stop()
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def md_server():
     server = random_server(8, 16, 1, 4)
     yield server
     server.stop()
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def ms_server():
     server = random_server(1, 4, 16, 32)
     yield server
     server.stop()
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def tls_server():
     server = Server()
     server.configure_random_domain(1, addr_fun=random_tls_addr)
@@ -301,7 +301,7 @@ def limited_server(resources):
     return server
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def limited_clients_server():
     server = limited_server({
         "user": {"clients": MAX_USER_CLIENTS},
@@ -311,7 +311,7 @@ def limited_clients_server():
     server.stop()
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def limited_services_server():
     server = limited_server({
         "user": {"services": MAX_USER_SERVICES},
@@ -321,7 +321,7 @@ def limited_services_server():
     server.stop()
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def limited_subscriptions_server():
     server = limited_server({
         "user": {"subscriptions": MAX_USER_SUBSCRIPTIONS},
