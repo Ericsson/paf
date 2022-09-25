@@ -7,6 +7,7 @@ import os
 
 import paf.sd
 import paf.server
+import paf.proto
 import paf.eventloop
 import paf.conf
 from paf.logging import LogCategory, info, exception
@@ -18,6 +19,7 @@ def usage(name):
           "[-f <conf-file>]" % name)
     print("%s [-m <addr0>+...+<addrN>] [<domain-addr> ...]" %
           (len(name) * " "))
+    print("%s -v" % name)
     print("%s -h" % name)
     print("Arguments:")
     print("  <domain-addr>  The XCM server address of a domain to be "
@@ -36,6 +38,7 @@ def usage(name):
     print("                          to <max-clients>. The default "
           "is no limit.")
     print("  -f <conf-file>          Read configuration from <conf-file>.")
+    print("  -v                      Print version information.")
     print("  -h                      Print this text.")
 
 
@@ -98,7 +101,7 @@ def main(argv):
     hook = None
 
     try:
-        optlist, args = getopt.getopt(argv[1:], 'f:m:snl:y:c:r:h')
+        optlist, args = getopt.getopt(argv[1:], 'f:m:snl:y:c:r:vh')
     except getopt.GetoptError as e:
         early_error("Error parsning command line: %s." % e)
 
@@ -144,6 +147,10 @@ def main(argv):
                 early_error("Client limit must be an integer.")
         elif opt == '-r':
             hook = optval
+        elif opt == '-v':
+            print("Server version: %s" % paf.server.VERSION)
+            print("Protocol version(s): %d" % paf.proto.VERSION)
+            sys.exit(0)
         elif opt == '-h':
             usage(argv[0])
             sys.exit(0)

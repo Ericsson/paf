@@ -58,6 +58,9 @@ used.
  * `-f <conf-file>`
    Read configuration from <conf-file>.
 
+ * `-v`
+   Display pafd version information.
+
  * `-h`
    Display pafd usage information.
 
