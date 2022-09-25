@@ -2,9 +2,11 @@
 # Copyright(c) 2020 Ericsson AB
 
 
+import enum
+import errno
 import logging
 import logging.handlers
-import enum
+import os
 
 
 class LogCategory(enum.Enum):
@@ -13,6 +15,8 @@ class LogCategory(enum.Enum):
     CORE = 'core'
     INTERNAL = 'internal'
 
+
+LOG_DEV = '/dev/log'
 
 logger = logging.getLogger()
 
@@ -24,7 +28,12 @@ def configure(console=True, syslog=True, syslog_ident=None,
     if not console:
         logger.handlers = []
     if syslog:
-        syslog = logging.handlers.SysLogHandler(address='/dev/log',
+        # In containers, the log device file may not exist. This is a reason
+        # to fail early.
+        if not os.path.exists(LOG_DEV):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT),
+                                    LOG_DEV)
+        syslog = logging.handlers.SysLogHandler(address=LOG_DEV,
                                                 facility=syslog_facility)
         if syslog_ident is not None:
             syslog.ident = syslog_ident

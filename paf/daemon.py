@@ -62,10 +62,6 @@ def run_hook(hook, servers):
 
 
 def run(conf, hook=None):
-    syslog_ident = 'pafd[%d]: ' % os.getpid()
-    paf.logging.configure(conf.log.console, conf.log.syslog, syslog_ident,
-                          conf.log.facility, conf.log.filter)
-
     event_loop = paf.eventloop.EventLoop()
 
     try:
@@ -99,66 +95,73 @@ def run(conf, hook=None):
 
 
 def main(argv):
+    hook = None
+
     try:
-        hook = None
-
         optlist, args = getopt.getopt(argv[1:], 'f:m:snl:y:c:r:h')
-
-        conf_filename = None
-        for opt, optval in optlist:
-            if opt == '-f':
-                conf_filename = optval
-        if conf_filename is None:
-            conf = paf.conf.default()
-        else:
-            conf = paf.conf.load(conf_filename)
-
-        domains = [[domain_addr] for domain_addr in args]
-
-        if len(domains) > 0:
-            conf.set_domains(domains)
-
-        for opt, optval in optlist:
-            if opt == '-m':
-                domain = []
-                for addr in optval.split('+'):
-                    domain.append(addr)
-                domains.append(domain)
-            elif opt == '-s':
-                conf.log.set_console(True)
-            elif opt == '-n':
-                conf.log.set_syslog(False)
-            elif opt == '-l':
-                conf.log.set_filter(optval)
-            elif opt == '-y':
-                conf.log.set_facility(optval)
-            elif opt == '-c':
-                try:
-                    clients = int(optval)
-                    if clients == 0:
-                        conf.resources.total.clear_limit("clients")
-                    else:
-                        conf.resources.total.set_limit("clients", clients)
-                except ValueError:
-                    early_error("Client limit must be an integer.")
-            elif opt == '-r':
-                hook = optval
-            elif opt == '-h':
-                usage(argv[0])
-                sys.exit(0)
-
-        if len(domains) > 0:
-            conf.set_domains(domains)
-
-        if len(conf.domains) == 0:
-            early_error("No domains configured.")
-
-        run(conf, hook)
-
     except getopt.GetoptError as e:
         early_error("Error parsning command line: %s." % e)
-    except (paf.conf.Error, FileNotFoundError) as e:
-        early_error("Error reading configuration: %s" % e)
+
+    conf_filename = None
+    for opt, optval in optlist:
+        if opt == '-f':
+            conf_filename = optval
+    if conf_filename is None:
+        conf = paf.conf.default()
+    else:
+        try:
+            conf = paf.conf.load(conf_filename)
+        except (OSError, paf.conf.Error) as e:
+            early_error("Error reading configuration: %s" % e)
+
+    domains = [[domain_addr] for domain_addr in args]
+
+    if len(domains) > 0:
+        conf.set_domains(domains)
+
+    for opt, optval in optlist:
+        if opt == '-m':
+            domain = []
+            for addr in optval.split('+'):
+                domain.append(addr)
+            domains.append(domain)
+        elif opt == '-s':
+            conf.log.set_console(True)
+        elif opt == '-n':
+            conf.log.set_syslog(False)
+        elif opt == '-l':
+            conf.log.set_filter(optval)
+        elif opt == '-y':
+            conf.log.set_facility(optval)
+        elif opt == '-c':
+            try:
+                clients = int(optval)
+                if clients == 0:
+                    conf.resources.total.clear_limit("clients")
+                else:
+                    conf.resources.total.set_limit("clients", clients)
+            except ValueError:
+                early_error("Client limit must be an integer.")
+        elif opt == '-r':
+            hook = optval
+        elif opt == '-h':
+            usage(argv[0])
+            sys.exit(0)
+
+    if len(domains) > 0:
+        conf.set_domains(domains)
+
+    if len(conf.domains) == 0:
+        early_error("No domains configured.")
+
+    try:
+        syslog_ident = 'pafd[%d]: ' % os.getpid()
+        paf.logging.configure(conf.log.console, conf.log.syslog, syslog_ident,
+                              conf.log.facility, conf.log.filter)
+    except Exception as e:
+        early_error("Error configuring logging: %s." % e)
+
+    run(conf, hook)
 
 
 if __name__ == "__main__":
