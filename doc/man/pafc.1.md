@@ -3,8 +3,10 @@ pafc(1) -- service discovery client
 
 ## SYNOPSIS
 
-`pafc` <domain-name>|<domain-addr><br>
-`pafc` `-h`
+`pafc` <addr><br>
+`pafc` [-n <server-index>>] [-a] <domain><br>
+`pafc` -l<br>
+`pafc` -h
 
 ## DESCRIPTION
 
@@ -25,6 +27,18 @@ location of such domain files.
 If the service discovery domain name resolves to multiple addresses
 (i.e., the file contains multiple server addresses), the first server
 in the list will be used.
+
+## OPTIONS
+
+ * `-n <server-index>`
+   Connect to server address at <server-index> in the list of servers
+   for the specified domain. Default is 0.
+ * `-a`
+   List all server addresses of specified domain.
+ * `-l`
+   List all configured domains (i.e., files in the domains directory).
+ * `-h`
+   Display pafc usage information.
 
 ## INTERACTIVE COMMANDS
 
@@ -90,11 +104,6 @@ Most of the pafc interactive commands maps closely to a Pathfinder
 protocol-level command. For more information on command requests and
 responses, please refer to the appropriate section of the Pathfinder
 protocol specification.
-
-## OPTIONS
-
- * `-h`
-   Display pafc usage information.
 
 ## EXAMPLES
 

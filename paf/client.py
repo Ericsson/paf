@@ -420,6 +420,24 @@ DOMAIN_FILE_TO_XCM_ATTR = {
 }
 
 
+def domains_dir():
+    if DOMAINS_ENV in os.environ:
+        return os.environ[DOMAINS_ENV]
+    else:
+        return DEFAULT_DOMAINS_DIR
+
+
+def domain_filename(domain):
+    return os.path.join(domains_dir(), domain)
+
+
+def list_domains():
+    d = domains_dir()
+    for f in os.listdir(d):
+        if os.path.isfile(os.path.join(d, f)):
+            yield f
+
+
 def looks_like_json_object(s):
     # see RFC 7159, section 2 for grammar
     for c in s:
@@ -454,13 +472,8 @@ def parse_domain_custom(data):
 
 
 def read_domain(domain):
-    domains_dir = DEFAULT_DOMAINS_DIR
-    if DOMAINS_ENV in os.environ:
-        domains_dir = os.environ[DOMAINS_ENV]
-    domains_file = "%s/%s" % (domains_dir, domain)
-
     try:
-        domains_data = open(domains_file).read()
+        domains_data = open(domain_filename(domain)).read()
     except IOError:
         return []
 

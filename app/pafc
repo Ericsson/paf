@@ -3,23 +3,32 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright(c) 2020 Ericsson AB
 
-import sys
-import select
-import os
-import time
 from threading import Thread, Semaphore
 import cmd
-import fcntl
-import shlex
-import datetime
 import collections
+import datetime
+import fcntl
+import getopt
+import os
+import select
+import shlex
+import sys
+import time
 
 import paf.client as client
 import paf.props as props
 
 
 def usage(name):
-    print("%s <addr>|<domain>" % name)
+    print("%s <addr>" % name)
+    print("%s [-n <server-index>>] [-a] <domain>" % name)
+    print("%s -l" % name)
+    print("%s -h" % name)
+    print("OPTIONS:")
+    print("    -n <server-index>  Use specified server index. Default is 0.")
+    print("    -a                 List all server addresses of "
+          "specified domain.")
+    print("    -l                 List all domains.")
 
 
 def connect(addr):
@@ -441,16 +450,81 @@ class PafCli(cmd.Cmd):
     do_EOF = do_quit
 
 
-if __name__ == '__main__':
-    if len(sys.argv) != 2 or sys.argv[1] == '-h':
+def read_domain_addrs(domain):
+    return [conf.addr for conf in client.read_domain(domain)]
+
+
+def list_servers(args):
+    if len(args) != 1:
+        print("Domain is missing.")
+        sys.exit(1)
+
+    servers = read_domain_addrs(args[0])
+
+    print('\n'.join(servers))
+
+    sys.exit(0)
+
+
+def list_domains(args):
+    if len(args) > 0:
         usage(sys.argv[0])
         sys.exit(1)
-    addr = sys.argv[1]
 
-    worker = init(addr)
+    domains = client.list_domains()
 
-    cli = PafCli(worker)
+    print('\n'.join(domains))
 
-    cli.cmdloop()
+    sys.exit(0)
 
-    os._exit(0)
+
+if __name__ == '__main__':
+    try:
+        list_addrs = False
+        server_num = None
+
+        optlist, args = getopt.getopt(sys.argv[1:], 'n:alh')
+
+        for opt, optval in optlist:
+            if opt == '-n':
+                server_num = int(optval)
+            elif opt == '-a':
+                list_servers(args)
+            elif opt == '-l':
+                list_domains(args)
+            elif opt == '-h':
+                usage(sys.argv[0])
+                sys.exit(0)
+
+        if len(args) != 1:
+            usage(sys.argv[0])
+            sys.exit(1)
+
+        servers = read_domain_addrs(args[0])
+
+        if len(servers) == 0:
+            if server_num is not None:
+                print("Domain \"%s\" does not exist, but yet was a server "
+                      "index specified." % args[0])
+                sys.exit(1)
+
+            addr = args[0]
+        else:
+            if server_num is None:
+                addr = servers[0]
+            elif server_num < len(servers):
+                addr = servers[server_num]
+            else:
+                print("No server address with index %d." % server_num)
+                sys.exit(1)
+
+        worker = init(addr)
+
+        cli = PafCli(worker)
+
+        cli.cmdloop()
+
+        os._exit(0)
+    except getopt.GetoptError as e:
+        print("Error parsning command line: %s." % e)
+        sys.exit(1)
