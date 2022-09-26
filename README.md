@@ -10,7 +10,7 @@ This repository contains the server-side implementation of the
 protocol](https://github.com/Ericsson/paf/blob/master/doc/PROTOCOL.md)
 version 2.
 
-## Technical Overview
+## Overview
 
 In a distributed system, such as a Radio Access Network (RAN) or a
 large micro service-based web application, a process in need of a
@@ -161,3 +161,15 @@ repository. It also has a Python interface.
 
 Compared to `libpaf` and `<paf.h>`, the `paf.client` Python API is
 more low-level and maps closely to the Pathfinder wire protocol.
+
+## Documentation
+
+The [Pathfinder application protocol
+specification](https://github.com/Ericsson/paf/blob/master/doc/PROTOCOL.md),
+in particular the data model section, includes a lot of useful
+information on how a Pathfinder service discovery system works.
+
+### Manual pages
+
+* [pafd](https://ericsson.github.io/paf/man/pafd.8.html)
+* [pafc](https://ericsson.github.io/paf/man/pafc.1.html)
