@@ -431,6 +431,11 @@ class PafCli(cmd.Cmd):
         print("")
         return True
 
+    def do_help(self, line):
+        """help [<topic>]
+        List all command, or print help text for the specified command."""
+        cmd.Cmd.do_help(self, line)
+
     def emptyline(self):
         pass
     do_EOF = do_quit
