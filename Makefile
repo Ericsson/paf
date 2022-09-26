@@ -4,12 +4,9 @@ XCMCERTNAMES=server client0 client1 client2
 XCMCERTDIRS=$(foreach name,$(XCMCERTNAMES), test/cert/cert-$(name))
 XCMCERTS=$(foreach dir,$(XCMCERTDIRS), $(dir)/cert.pem)
 
-UMLSRC=doc/pub_client_long_disconnect.plantuml \
-	doc/pub_client_short_disconnect.plantuml \
-	doc/sub_client_long_disconnect.plantuml \
-	doc/sub_client_short_disconnect.plantuml \
-	doc/server_restart.plantuml
-UMLPNG=$(patsubst %.plantuml,%.png,$(UMLSRC))
+MANSRC=doc/man/pafd.8.md doc/man/pafc.1.md
+MANHTML=$(patsubst %.md,%.html,$(MANSRC))
+MANROFF=$(patsubst %.md,%,$(MANSRC))
 
 all: build
 
@@ -62,10 +59,10 @@ $(foreach dir,$(XCMCERTDIRS),$(eval $(call cert_template,$(dir))))
 
 cert: $(XCMCERTS)
 
-.PHONY: doc
-doc: $(UMLPNG)
-%.png: %.plantuml
-	plantuml $<
+doc: $(MANHTML) $(MANROFF)
+
+$(MANHTML) $(MANROFF): $(MANSRC)
+	ronn $(MANSRC)
 
 count:
 	@echo "Server:"
@@ -85,6 +82,6 @@ clean:
 	rm -f test/domains.d/*
 	rm -f test/test-pafd.conf
 	rm -rf $(XCMCERTDIRS) test/cert/ca
-	rm -f $(UMLPNG)
+	rm -f $(MANHTML) $(MANROFF)
 	rm -rf build
 	rm -rf dist
