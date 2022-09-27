@@ -20,20 +20,23 @@ import paf.props as props
 
 
 def usage(name):
-    print("%s <addr>" % name)
-    print("%s [-n <server-index>>] [-a] <domain>" % name)
+    print("%s [-i <client_id>] <addr>" % name)
+    print("%s [-i <client-id>] [-n <server-index>>] [-a] <domain>" % name)
     print("%s -l" % name)
     print("%s -h" % name)
     print("OPTIONS:")
+    print("    -i <client_id>     Set client id to use, in hexadecimal. If "
+          "not set, an\n"
+          "                       id will be generated.")
     print("    -n <server-index>  Use specified server index. Default is 0.")
     print("    -a                 List all server addresses of "
           "specified domain.")
     print("    -l                 List all domains.")
 
 
-def connect(addr):
+def connect(addr, client_id):
     try:
-        return client.connect(addr)
+        return client.connect(addr, client_id=client_id)
     except client.Error as e:
         print("Error communicationg with Patherfind server: %s." % str(e))
         sys.exit(1)
@@ -298,8 +301,8 @@ class Worker(Thread):
             print("Operation failed for unknown reasons.")
 
 
-def init(addr):
-    conn = connect(addr)
+def init(addr, client_id):
+    conn = connect(addr, client_id)
     worker = Worker(conn)
     worker.start()
     return worker
@@ -480,13 +483,16 @@ def list_domains(args):
 
 if __name__ == '__main__':
     try:
+        client_id = None
         list_addrs = False
         server_num = None
 
-        optlist, args = getopt.getopt(sys.argv[1:], 'n:alh')
+        optlist, args = getopt.getopt(sys.argv[1:], 'i:n:alh')
 
         for opt, optval in optlist:
-            if opt == '-n':
+            if opt == '-i':
+                client_id = int(optval, 16)
+            elif opt == '-n':
                 server_num = int(optval)
             elif opt == '-a':
                 list_servers(args)
@@ -518,7 +524,7 @@ if __name__ == '__main__':
                 print("No server address with index %d." % server_num)
                 sys.exit(1)
 
-        worker = init(addr)
+        worker = init(addr, client_id)
 
         cli = PafCli(worker)
 

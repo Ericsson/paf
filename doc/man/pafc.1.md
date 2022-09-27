@@ -3,8 +3,9 @@ pafc(1) -- service discovery client
 
 ## SYNOPSIS
 
-`pafc` <addr><br>
-`pafc` [-n <server-index>>] [-a] <domain><br>
+`pafc` [-i <client_id>] <addr><br>
+`pafc` [-i <client_id>] [-n <server-index>>] <domain><br>
+`pafc` [-a] <domain><br>
 `pafc` -l<br>
 `pafc` -h
 
@@ -30,6 +31,9 @@ in the list will be used.
 
 ## OPTIONS
 
+ * `-i <client_id>`
+   Specify the client identifier to be used, in hexadecimal format. If
+   not set, pafc uses a randomly generated id.
  * `-n <server-index>`
    Connect to server address at <server-index> in the list of servers
    for the specified domain. Default is 0.
@@ -108,9 +112,12 @@ protocol specification.
 ## EXAMPLES
 
 In the below session, a user connects to a server serving the service
-discovery domain "oam":
+discovery domain "oam" and checks the latency:
 
     $ pafc oam
+    > ping
+    0.4 ms
+    OK.
     >
 
 The below is pafc session where the user connects to a server on the
