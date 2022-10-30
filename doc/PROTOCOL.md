@@ -24,7 +24,7 @@ originating client, and server state may thus be recreated, if needed.
 
 ## Document Version
 
-This is version 2.0.0-draft.1 of the Pathfinder protocol
+This is version 2.0.0-draft.2 of the Pathfinder protocol
 specification.
 
 This is an early draft and may well include inconsistencies and other
@@ -478,7 +478,7 @@ A `complete` message, which MUST follow an `accept` or `notification`
 message, means that the requested operation has completed.
 
 The client and server MUST NOT send any other messages beyond these as
-a part of a single reponse transaction.
+a part of a multiple reponse transaction.
 
 Below is an example of a multiple response transaction. Here, the
 client issues a `subscribe` command, and receives two `appeared` type
