@@ -211,11 +211,10 @@ connectivity), a reconnecting client MUST republish all its services.
 
 The server MUST allow a client to publish a service, with identical
 service identifier, properties, TTL, and owning client identifier to
-an already-existing service. However, it MAY prohibit such a republish
-operation for security reasons (e.g., transport protocol level
-authorization suggests the two client identifiers should not be
-allowed to overwrite each other services), if the new and
-already-existing service are not identical.
+an already-existing service. However, a server MAY prohibit such a
+republish operation for security reasons (e.g., transport protocol
+level authorization suggests the two client identifiers should not be
+allowed to overwrite each other services).
 
 The lifetime of a service is tied to the owning client being connected
 to the server. If the transport connection of a particular client is
