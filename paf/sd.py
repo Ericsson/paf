@@ -369,8 +369,12 @@ class ServiceDiscovery:
         self.resource_manager.deallocate(user_id, ResourceType.CLIENT)
         now = time.time()
         for service in self.get_services_with_client_id(client_id):
-            with service.modify():
-                service.make_orphan(now)
+            try:
+                service.check_access(user_id)
+                with service.modify():
+                    service.make_orphan(now)
+            except PermissionError:
+                pass
         client_subscriptions = \
             list(self.get_subscriptions_with_client_id(client_id))
         for subscription in client_subscriptions:

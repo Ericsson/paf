@@ -646,6 +646,43 @@ def test_republish_same_generation_orphan_from_different_client(server):
 
 
 @pytest.mark.fast
+def test_orphan_unaffected_by_same_client_wrong_user(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+    client_id = client.allocate_client_id()
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
+    conn_owner = client.connect(domain_addr, client_id=client_id)
+
+    service_id = conn_owner.service_id()
+    generation = 1
+    service_props = {
+        "name": {"service-x"},
+    }
+    service_ttl = 2
+
+    conn_owner.publish(service_id, generation, service_props, service_ttl)
+
+    conn_owner.close()
+
+    time.sleep(service_ttl / 2)
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[1]
+    conn_non_owner = client.connect(domain_addr, client_id=client_id)
+    conn_non_owner.ping()
+    conn_non_owner.close()
+
+    time.sleep(service_ttl / 2 + 0.25)
+
+    conn = client.connect(domain_addr)
+
+    # the non-owning client id should not affect the orphan status, and
+    # thus the service should be removed by now
+    assert len(conn.services()) == 0
+
+    conn.close()
+
+
+@pytest.mark.fast
 def test_reconnect_immediate_disconnect(server):
     domain_addr = server.random_domain().random_addr()
 
