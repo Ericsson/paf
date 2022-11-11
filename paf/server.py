@@ -17,7 +17,7 @@ from paf.logging import LogCategory, debug, info, warning
 
 MAJOR_VERSION = 1
 MINOR_VERSION = 0
-PATCH_VERSION = 3
+PATCH_VERSION = 4
 
 VERSION = "%d.%d.%d" % (MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)
 
