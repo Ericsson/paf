@@ -34,9 +34,9 @@ def usage(name):
     print("    -l                 List all domains.")
 
 
-def connect(addr, client_id):
+def connect(server, client_id):
     try:
-        return client.connect(addr, client_id=client_id)
+        return client.connect(server, client_id=client_id)
     except client.Error as e:
         print("Error communicationg with Patherfind server: %s." % str(e))
         sys.exit(1)
@@ -301,8 +301,8 @@ class Worker(Thread):
             print("Operation failed for unknown reasons.")
 
 
-def init(addr, client_id):
-    conn = connect(addr, client_id)
+def init(server, client_id):
+    conn = connect(server, client_id)
     worker = Worker(conn)
     worker.start()
     return worker
@@ -453,18 +453,14 @@ class PafCli(cmd.Cmd):
     do_EOF = do_quit
 
 
-def read_domain_addrs(domain):
-    return [conf.addr for conf in client.read_domain(domain)]
-
-
 def list_servers(args):
     if len(args) != 1:
         print("Domain is missing.")
         sys.exit(1)
 
-    servers = read_domain_addrs(args[0])
+    servers = client.read_domain(args[0])
 
-    print('\n'.join(servers))
+    print('\n'.join([server.addr for server in servers]))
 
     sys.exit(0)
 
@@ -506,25 +502,25 @@ if __name__ == '__main__':
             usage(sys.argv[0])
             sys.exit(1)
 
-        servers = read_domain_addrs(args[0])
+        servers = client.read_domain(args[0])
 
         if len(servers) == 0:
             if server_num is not None:
-                print("Domain \"%s\" does not exist, but yet was a server "
-                      "index specified." % args[0])
+                print("Domain \"%s\" does not exist, but yet a server "
+                      "was index specified." % args[0])
                 sys.exit(1)
 
-            addr = args[0]
+            server = args[0]
         else:
             if server_num is None:
-                addr = servers[0]
+                server = servers[0]
             elif server_num < len(servers):
-                addr = servers[server_num]
+                server = servers[server_num]
             else:
                 print("No server address with index %d." % server_num)
                 sys.exit(1)
 
-        worker = init(addr, client_id)
+        worker = init(server, client_id)
 
         cli = PafCli(worker)
 

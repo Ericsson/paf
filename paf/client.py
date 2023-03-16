@@ -495,8 +495,11 @@ def allocate_client_id():
     return random.randint(0, ((1 << 63) - 1))
 
 
-def connect(domain_or_addr, client_id=None, ready_cb=None):
-    server = domain_server(domain_or_addr)
+def connect(domain_or_addr_or_conf, client_id=None, ready_cb=None):
+    if isinstance(domain_or_addr_or_conf, ServerConf):
+        server = domain_or_addr_or_conf
+    else:
+        server = domain_server(domain_or_addr_or_conf)
     if client_id is None:
         client_id = allocate_client_id()
     return Client(client_id, server, ready_cb)
