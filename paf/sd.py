@@ -3,7 +3,7 @@
 
 
 import collections
-import copy
+import contextlib
 import enum
 import time
 
@@ -38,27 +38,34 @@ class AlreadyExistsError(Error):
         Error.__init__(self, "%s id %d already exists" % (obj_type, obj_id))
 
 
+class UserIdChanged(PermissionError):
+    def __init__(self, client_id, new_user_id, old_user_id):
+        PermissionError.__init__(self, "attempt to change client id %d "
+                                 "user id from \"%s\" to \"%s\"" %
+                                 (client_id, old_user_id, new_user_id))
+
+
 class ResourceError(Error):
     def __init__(self, message):
         Error.__init__(self, message)
 
 
 class ChangeType(enum.Enum):
-    ADDED = 1
-    MODIFIED = 2
-    REMOVED = 3
+    ADDED = enum.auto()
+    MODIFIED = enum.auto()
+    REMOVED = enum.auto()
 
 
 class MatchType(enum.Enum):
-    APPEARED = 1
-    MODIFIED = 2
-    DISAPPEARED = 3
+    APPEARED = enum.auto()
+    MODIFIED = enum.auto()
+    DISAPPEARED = enum.auto()
 
 
 class ResourceType(enum.Enum):
-    CLIENT = 0
-    SUBSCRIPTION = 1
-    SERVICE = 2
+    CLIENT = enum.auto()
+    SUBSCRIPTION = enum.auto()
+    SERVICE = enum.auto()
 
 
 DEFAULT_USER_ID = "default"
@@ -193,27 +200,11 @@ class Generation:
         return True
 
     def copy(self):
-        return copy.copy(self)
-
-
-def assure_allowed(fun, allowed_change_types):
-    def assure_wrap(self, *args, **kwargs):
-        assert self.change in allowed_change_types
-        return fun(self, *args, **kwargs)
-    return assure_wrap
-
-
-def assure_changing(fun):
-    return assure_allowed(fun, (ChangeType.ADDED, ChangeType.MODIFIED,
-                                ChangeType.REMOVED))
-
-
-def assure_writable(fun):
-    return assure_allowed(fun, (ChangeType.ADDED, ChangeType.MODIFIED))
-
-
-def assure_not_changing(fun):
-    return assure_allowed(fun, (None,))
+        copy = Generation()
+        for name in GENERATION_FIELD_NAMES:
+            value = getattr(self, name)
+            setattr(copy, name, value)
+        return copy
 
 
 class Service:
@@ -221,8 +212,6 @@ class Service:
         self.service_id = service_id
         self.prev = None
         self.cur = None
-        self.next = None
-        self.change = None
         self.change_cb = change_cb
 
     def has_prev_generation(self):
@@ -230,12 +219,6 @@ class Service:
 
     def is_orphan(self):
         return self.orphan_since() is not None
-
-    def make_orphan(self, now):
-        self.set_orphan_since(now)
-
-    def adopted(self):
-        self.set_orphan_since(None)
 
     def orphan_timeout(self):
         return self.orphan_since() + self.ttl()
@@ -246,50 +229,32 @@ class Service:
     def prev_orphan_timeout(self):
         return self.prev_orphan_since() + self.prev_ttl()
 
-    @assure_not_changing
+    @contextlib.contextmanager
     def add(self):
-        self.change = ChangeType.ADDED
-        self.next = Generation()
-        return self
+        ng = Generation()
+        yield ng
+        self.commit(ChangeType.ADDED, ng)
 
-    @assure_not_changing
+    @contextlib.contextmanager
     def modify(self):
-        self.change = ChangeType.MODIFIED
-        self.next = self.cur.copy()
-        return self
+        ng = self.cur.copy()
+        yield ng
+        self.commit(ChangeType.MODIFIED, ng)
 
-    @assure_not_changing
     def remove(self):
-        self.change = ChangeType.REMOVED
-        return self
+        self.commit(ChangeType.REMOVED)
 
-    @assure_changing
-    def commit(self):
-        if self.change == ChangeType.ADDED or \
-           self.change == ChangeType.MODIFIED:
-            assert self.next.is_consistent()
+    def commit(self, change, ng=None):
+        if change == ChangeType.ADDED or change == ChangeType.MODIFIED:
+            assert ng.is_consistent()
+        else:
+            assert change == ChangeType.REMOVED
+            assert ng is None
+
         self.prev = self.cur
-        self.cur = self.next
-        self.next = None
-        change = self.change
-        self.change = None
+        self.cur = ng
 
         self.change_cb(change, self)
-
-    @assure_changing
-    def rollback(self):
-        self.change = None
-        self.next = None
-
-    def __enter__(self):
-        assert self.change is not None
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        if exc_value is None:
-            self.commit()
-        else:
-            self.rollback()
 
     def check_access(self, user_id):
         if user_id != self.user_id():
@@ -303,10 +268,6 @@ for name in GENERATION_FIELD_NAMES:
 
     setattr(Service, "prev_%s" % name,
             lambda self, name=name: getattr(self.prev, name))
-
-    setattr(Service, "set_%s" % name,
-            assure_writable(lambda self, value, name=name:
-                            setattr(self.next, name, value)))
 
 
 class TimeoutQueue:
@@ -344,180 +305,442 @@ class TimeoutQueue:
         return iter(self.queue)
 
 
-class ServiceDiscovery:
-    def __init__(self, max_user_resources, max_total_resources,
-                 service_change_cb=None):
-        self.resource_manager = \
-            ResourceManager(max_user_resources, max_total_resources)
-        self.services = {}
-        self.subscriptions = {}
-        self.clients = {}
-        self.service_change_cb = service_change_cb
-        self.orphans = TimeoutQueue()
+def assure_state(fun, is_connected):
+    def assure_wrap(self, *args, **kwargs):
+        assert self.is_connected() == is_connected
+        return fun(self, *args, **kwargs)
+    return assure_wrap
 
-    def client_connect(self, client_id, user_id):
-        if client_id in self.clients:
-            raise AlreadyExistsError("client", client_id)
-        self.resource_manager.allocate(user_id, ResourceType.CLIENT)
-        self.clients[client_id] = user_id
+
+def assure_connected(fun):
+    return assure_state(fun, True)
+
+
+def assure_not_connected(fun):
+    return assure_state(fun, False)
+
+
+class Connection:
+    def __init__(self, client):
+        self.client = client
+        self.subscriptions = {}
+        self.services = {}
+        self.connected_at = time.time()
+        self.disconnected_at = None
+
+    def client_id(self):
+        return self.client.client_id
+
+    def user_id(self):
+        return self.client.user_id
+
+    @assure_connected
+    def add_subscription(self, subscription):
+        self.subscriptions[subscription.sub_id] = subscription
+
+    def remove_subscription(self, subscription):
+        del self.subscriptions[subscription.sub_id]
+
+    def has_subscription(self, sub_id):
+        return sub_id in self.subscriptions
+
+    def get_subscription(self, sub_id):
+        return self.subscriptions.get(sub_id)
+
+    def get_subscriptions(self):
+        return self.subscriptions.values()
+
+    @assure_connected
+    def add_service(self, service):
+        self.services[service.service_id] = service
+
+    def remove_service(self, service):
+        del self.services[service.service_id]
+
+    def has_service(self, service_id):
+        return service_id in self.services
+
+    def get_services(self):
+        return self.services.values()
+
+    def is_connected(self):
+        return self.disconnected_at is None
+
+    @assure_connected
+    def mark_disconnected(self):
+        self.disconnected_at = time.time()
+
+    def is_stale(self):
+        return not self.is_connected() and len(self.services) == 0
+
+
+class DB:
+    def __init__(self):
+        self.subscriptions = {}
+        self.services = {}
+        self.clients = {}
 
     def has_client(self, client_id):
         return client_id in self.clients
 
-    def client_disconnect(self, client_id):
-        user_id = self._get_user_id(client_id)
-        self.resource_manager.deallocate(user_id, ResourceType.CLIENT)
-        now = time.time()
-        for service in self.get_services_with_client_id(client_id):
-            try:
-                service.check_access(user_id)
-                with service.modify():
-                    service.make_orphan(now)
-            except PermissionError:
-                pass
-        client_subscriptions = \
-            list(self.get_subscriptions_with_client_id(client_id))
-        for subscription in client_subscriptions:
-            self._remove_subscription(subscription)
-        del self.clients[client_id]
+    def get_client(self, client_id):
+        return self.clients.get(client_id)
 
-    def max_total_clients(self):
-        return self.resource_manager.max_total_resources[ResourceType.CLIENT]
+    def get_clients(self):
+        return self.clients.values()
 
-    def _get_user_id(self, client_id):
-        try:
-            return self.clients[client_id]
-        except KeyError:
-            raise NotFoundError("client", client_id)
+    def add_client(self, client):
+        self.clients[client.client_id] = client
 
-    def publish(self, service_id, generation, service_props, ttl, client_id):
-        user_id = self._get_user_id(client_id)
-        if service_id in self.services:
-            service = self.services[service_id]
-            service.check_access(user_id)
+    def remove_client(self, client):
+        del self.clients[client.client_id]
+
+    def has_service(self, service_id):
+        return service_id in self.services
+
+    def get_service(self, service_id):
+        return self.services.get(service_id)
+
+    def get_services(self):
+        return self.services.values()
+
+    def add_service(self, service):
+        self.services[service.service_id] = service
+
+    def remove_service(self, service):
+        del self.services[service.service_id]
+
+    def has_subscription(self, sub_id):
+        return sub_id in self.subscriptions
+
+    def get_subscription(self, sub_id):
+        return self.subscriptions.get(sub_id)
+
+    def get_subscriptions(self):
+        return self.subscriptions.values()
+
+    def add_subscription(self, subscription):
+        self.subscriptions[subscription.sub_id] = subscription
+
+    def remove_subscription(self, subscription):
+        del self.subscriptions[subscription.sub_id]
+
+
+class Client:
+    def __init__(self, client_id, user_id, db, resource_manager):
+        self.client_id = client_id
+        self.user_id = user_id
+        self.db = db
+        self.resource_manager = resource_manager
+        self.active_connection = None
+        self.inactive_connections = []
+
+    def is_connected(self):
+        return self.active_connection is not None
+
+    def is_stale(self):
+        for connection in self.get_connections():
+            if not connection.is_stale():
+                return False
+        return True
+
+    def connect(self, user_id):
+        if self.is_connected():
+            raise AlreadyExistsError("client", self.client_id)
+        elif self.user_id != user_id:
+            raise UserIdChanged(self.client_id, user_id, self.user_id)
+
+        self.resource_manager.allocate(self.user_id, ResourceType.CLIENT)
+
+        self.db.add_client(self)
+
+        self.active_connection = Connection(self)
+
+    @assure_connected
+    def disconnect(self):
+        inactivated = self.active_connection
+        self.active_connection = None
+        self.inactive_connections.append(inactivated)
+
+        inactivated.mark_disconnected()
+
+        for subscription in list(inactivated.get_subscriptions()):
+            self.remove_subscription(subscription)
+
+        if inactivated.is_stale():
+            self.remove_connection(inactivated)
+
+        for service in inactivated.get_services():
+            with service.modify() as change:
+                change.orphan_since = inactivated.disconnected_at
+
+        self.resource_manager.deallocate(self.user_id, ResourceType.CLIENT)
+
+        if self.is_stale():
+            self.db.remove_client(self)
+
+    @assure_connected
+    def publish(self, service_id, generation, service_props, ttl,
+                service_change_cb):
+        service = self.db.get_service(service_id)
+
+        if service is not None:
+            service.check_access(self.user_id)
+
             if generation == service.generation():
                 if service_props != service.props() or ttl != service.ttl():
                     raise SameGenerationButDifferentError(
                         "properties/TTL changed, but generation is left at "
                         "%d" % generation
                     )
-                if service.client_id() != client_id or service.is_orphan():
-                    # owner comes back - with new or reused client id
-                    with service.modify():
+
+                prev_client_id = service.client_id()
+
+                if prev_client_id != self.client_id:
+                    self.capture_service(service)
+
+                    with service.modify() as change:
                         # The client id is allowed to change (though you might
                         # argue against this permissive behavior), however the
                         # assumption is that the user stays the same, so no
                         # need to transfer resource tokens.
-                        service.set_client_id(client_id)
-                        service.adopted()
-                return service
+                        change.orphan_since = None
+                        change.client_id = self.client_id
+                elif service.is_orphan():
+                    # previous owner is back
+                    with service.modify() as change:
+                        change.orphan_since = None
+
             elif generation > service.generation():
-                with service.modify():
-                    service.set_generation(generation)
-                    service.set_props(service_props)
-                    service.set_ttl(ttl)
-                    service.adopted()
-                    service.set_client_id(client_id)
-                return service
+                with service.modify() as change:
+                    change.generation = generation
+                    change.props = service_props
+                    change.ttl = ttl
+                    change.orphan_since = None
+                    change.client_id = self.client_id
+                    change.user_id = self.user_id
             else:
                 raise GenerationError("invalid generation %d: existing "
                                       "service already at generation %d" %
                                       (generation, service.generation()))
         else:
-            self.resource_manager.allocate(user_id, ResourceType.SERVICE)
-            service = Service(service_id, self._service_commit)
-            with service.add():
-                service.set_generation(generation)
-                service.set_props(service_props)
-                service.set_ttl(ttl)
-                service.set_client_id(client_id)
-                service.adopted()
-                service.set_user_id(user_id)
-                self.services[service_id] = service
-            return service
+            self.resource_manager.allocate(self.user_id,
+                                           ResourceType.SERVICE)
+            service = Service(service_id, service_change_cb)
+
+            with service.add() as change:
+                change.generation = generation
+                change.props = service_props
+                change.ttl = ttl
+                change.orphan_since = None
+                change.client_id = self.client_id
+                change.user_id = self.user_id
+
+                self.active_connection.add_service(service)
+
+                self.db.add_service(service)
+
+        return service
+
+    @assure_connected
+    def unpublish(self, service_id):
+
+        service = self.db.get_service(service_id)
+        if service is None:
+            raise NotFoundError("service", service_id)
+
+        service.check_access(self.user_id)
+
+        # A non-owning client may unpublish a service
+
+        owner = self.db.get_client(service.client_id())
+
+        owner.remove_service(service)
+
+    def get_connections(self):
+        if self.active_connection is not None:
+            yield self.active_connection
+        for connection in self.inactive_connections:
+            yield connection
+
+    def get_service_connection(self, service):
+        for connection in self.get_connections():
+            if connection.has_service(service.service_id):
+                return connection
+
+    def purge_orphan(self, service):
+        self.remove_service(service)
+
+    def capture_service(self, service):
+        victim_client = self.db.get_client(service.client_id())
+        victim_connection = \
+            victim_client.get_service_connection(service)
+        victim_connection.remove_service(service)
+        self.active_connection.add_service(service)
+
+    def remove_service(self, service):
+        connection = self.get_service_connection(service)
+        connection.remove_service(service)
+
+        self.resource_manager.deallocate(self.user_id, ResourceType.SERVICE)
+
+        if connection.is_stale():
+            self.remove_connection(connection)
+
+        if self.is_stale():
+            self.db.remove_client(self)
+
+        self.db.remove_service(service)
+
+        service.remove()
+
+    def create_subscription(self, sub_id, filter, match_cb):
+        if self.db.has_subscription(sub_id):
+            raise AlreadyExistsError("subscription", sub_id)
+
+        self.resource_manager.allocate(self.user_id,
+                                       ResourceType.SUBSCRIPTION)
+
+        subscription = \
+            Subscription(sub_id, filter, self.client_id, self.user_id,
+                         match_cb)
+
+        self.active_connection.add_subscription(subscription)
+        self.db.add_subscription(subscription)
+
+    def activate_subscription(self, sub_id):
+        subscription = self.active_connection.get_subscription(sub_id)
+
+        for service in self.db.get_services():
+            subscription.notify(ChangeType.ADDED, service)
+
+    def unsubscribe(self, sub_id):
+        subscription = self.db.get_subscription(sub_id)
+        if subscription is None:
+            raise NotFoundError("subscription", sub_id)
+
+        subscription.check_access(self.client_id)
+
+        self.remove_subscription(subscription)
+
+    def get_subscription_connection(self, subscription):
+        for connection in self.get_connections():
+            if connection.has_subscription(subscription.sub_id):
+                return connection
+
+    def remove_subscription(self, subscription):
+        connection = self.get_subscription_connection(subscription)
+
+        connection.remove_subscription(subscription)
+
+        self.db.remove_subscription(subscription)
+
+        self.resource_manager.deallocate(subscription.user_id,
+                                         ResourceType.SUBSCRIPTION)
+
+    def remove_connection(self, connection):
+        self.inactive_connections.remove(connection)
+
+
+class ServiceDiscovery:
+    def __init__(self, max_user_resources, max_total_resources,
+                 service_change_cb=None):
+        self.resource_manager = \
+            ResourceManager(max_user_resources, max_total_resources)
+        self.db = DB()
+        self.service_change_cb = service_change_cb
+        self.orphans = TimeoutQueue()
+
+    def client_connect(self, client_id, user_id):
+        client = self.db.get_client(client_id)
+
+        if client is None:
+            client = Client(client_id, user_id, self.db, self.resource_manager)
+
+        client.connect(user_id)
+
+    def client_disconnect(self, client_id):
+        client = self._get_connected_client(client_id)
+
+        client.disconnect()
+
+    def max_total_clients(self):
+        return self.resource_manager.max_total_resources[ResourceType.CLIENT]
+
+    def _get_connected_client(self, client_id):
+        client = self.db.get_client(client_id)
+
+        if client is None:
+            raise NotFoundError("client", client_id)
+
+        return client
+
+    def publish(self, service_id, generation, service_props, ttl, client_id):
+        client = self._get_connected_client(client_id)
+
+        service = client.publish(service_id, generation, service_props, ttl,
+                                 self._service_commit)
+        return service
 
     def purge_orphans(self):
         now = time.time()
         timed_out = []
+
         for orphan_id, orphan_timeout in self.orphans:
             if orphan_timeout > now:
                 break
             timed_out.append(orphan_id)
+
         for orphan_id in timed_out:
-            self._unpublish(orphan_id)
+            self.purge_orphan(orphan_id)
+
         return timed_out
+
+    def purge_orphan(self, service_id):
+        service = self.db.get_service(service_id)
+        client = self.db.get_client(service.client_id())
+        client.purge_orphan(service)
 
     def next_orphan_timeout(self):
         return self.orphans.next_timeout()
 
-    def _unpublish(self, service_id):
-        service = self.services.pop(service_id)
-        with service.remove():
-            self.resource_manager.deallocate(service.user_id(),
-                                             ResourceType.SERVICE)
-
     def unpublish(self, service_id, client_id):
-        user_id = self._get_user_id(client_id)
-        service = self.services.get(service_id)
-        if service is None:
-            raise NotFoundError("service", service_id)
-        service.check_access(user_id)
-        self._unpublish(service_id)
+        client = self._get_connected_client(client_id)
+
+        client.unpublish(service_id)
 
     def has_service(self, service_id):
-        return service_id in self.services
+        return self.db.has_service(service_id)
 
     def get_service(self, service_id):
-        service = self.services.get(service_id)
+        service = self.db.get_service(service_id)
         if service is None:
             raise NotFoundError("service", service_id)
         return service
 
     def get_services(self):
-        return self.services.values()
-
-    def get_services_with_client_id(self, client_id):
-        for service in self.services.values():
-            if service.client_id() == client_id:
-                yield service
+        return self.db.get_services()
 
     def create_subscription(self, sub_id, filter, client_id, match_cb):
-        user_id = self._get_user_id(client_id)
-        if sub_id in self.subscriptions:
-            raise AlreadyExistsError("subscription", sub_id)
-        self.resource_manager.allocate(user_id, ResourceType.SUBSCRIPTION)
-        subscription = \
-            Subscription(sub_id, filter, client_id, user_id, match_cb)
-        self.subscriptions[sub_id] = subscription
+        client = self._get_connected_client(client_id)
 
-    def activate_subscription(self, sub_id):
-        subscription = self.subscriptions[sub_id]
-        for service in self.services.values():
-            subscription.notify(ChangeType.ADDED, service)
+        return client.create_subscription(sub_id, filter, match_cb)
+
+    def activate_subscription(self, sub_id, client_id):
+        client = self.db.clients[client_id]
+
+        client.activate_subscription(sub_id)
 
     def get_subscription(self, sub_id):
-        return self.subscriptions[sub_id]
+        return self.db.get_subscription(sub_id)
 
     def get_subscriptions(self):
-        return self.subscriptions.values()
+        return self.db.get_subscriptions()
 
-    def get_subscriptions_with_client_id(self, client_id):
-        for subscription in self.subscriptions.values():
-            if subscription.client_id == client_id:
-                yield subscription
+    def unsubscribe(self, sub_id, client_id):
+        client = self._get_connected_client(client_id)
 
-    def _remove_subscription(self, subscription):
-        del self.subscriptions[subscription.sub_id]
-        self.resource_manager.deallocate(subscription.user_id,
-                                         ResourceType.SUBSCRIPTION)
-
-    def remove_subscription(self, sub_id, client_id):
-        assert client_id in self.clients
-        subscription = self.subscriptions.get(sub_id)
-        if subscription is None:
-            raise NotFoundError("subscription", sub_id)
-        subscription.check_access(client_id)
-        self._remove_subscription(subscription)
+        client.unsubscribe(sub_id)
 
     def _maintain_orphans(self, change, service):
         if change == ChangeType.ADDED and service.is_orphan():
@@ -539,7 +762,7 @@ class ServiceDiscovery:
             self.orphans.remove(service.service_id)
 
     def _service_commit(self, change, service):
-        for subscription in self.subscriptions.values():
+        for subscription in self.db.get_subscriptions():
             subscription.notify(change, service)
 
         self._maintain_orphans(change, service)

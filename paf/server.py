@@ -302,6 +302,10 @@ class Connection:
                 self.warning("Client %x is already connected." % client_id,
                              LogCategory.PROTOCOL)
                 yield ta.fail(fail_reason=proto.FAIL_REASON_CLIENT_ID_EXISTS)
+            except sd.PermissionError as e:
+                self.warning("Unable to connect: %s." % e,
+                             LogCategory.PROTOCOL)
+                yield ta.fail(fail_reason=proto.FAIL_REASON_PERMISSION_DENIED)
             except sd.ResourceError as e:
                 self.warning("Unable to connect: %s." % e,
                              LogCategory.SECURITY)
@@ -330,7 +334,7 @@ class Connection:
             # Subscription creation and activation must be separate,
             # to avoid having the match callback called before the
             # server has gotten the subscription id.
-            self.sd.activate_subscription(sub_id)
+            self.sd.activate_subscription(sub_id, self.client_id)
         except paf.filter.ParseError as e:
             self.warning("Received subscription request with malformed "
                          "filter: %s." % str(e), LogCategory.PROTOCOL)
@@ -349,7 +353,7 @@ class Connection:
 
     def unsubscribe_request(self, ta, sub_id):
         try:
-            self.sd.remove_subscription(sub_id, self.client_id)
+            self.sd.unsubscribe(sub_id, self.client_id)
             sub_ta = self.sub_tas[sub_id]
             del self.sub_tas[sub_id]
             yield sub_ta.complete()
@@ -369,12 +373,13 @@ class Connection:
 
     def subscriptions_request(self, ta):
         yield ta.accept()
-        for sub in self.sd.get_subscriptions():
-            if sub.filter is not None:
-                filter = str(sub.filter)
+        for subscription in self.sd.get_subscriptions():
+            if subscription.filter is not None:
+                filter = str(subscription.filter)
             else:
                 filter = None
-            yield ta.notify(sub.sub_id, sub.client_id, filter=filter)
+            yield ta.notify(subscription.sub_id, subscription.client_id,
+                            filter=filter)
         yield ta.complete()
 
     def services_request(self, ta, filter=None):
@@ -450,10 +455,8 @@ class Connection:
 
     def unpublish_request(self, ta, service_id):
         try:
-            service_props = self.sd.get_service(service_id).props()
             self.sd.unpublish(service_id, self.client_id)
-            self.debug("Unpublished service %s with service id %x." %
-                       (props.to_str(service_props), service_id),
+            self.debug("Unpublished service id %x." % service_id,
                        LogCategory.CORE)
             yield ta.complete()
         except sd.PermissionError as e:

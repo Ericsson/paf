@@ -626,7 +626,7 @@ def test_republish_new_generation_orphan_from_same_client_id(server):
 
 
 @pytest.mark.fast
-def test_republish_same_generation_orphan_from_same_client(server):
+def test_republish_same_generation_orphan_from_same_client_id(server):
     domain_addr = server.random_domain().random_addr()
     client_id = client.allocate_client_id()
     run_republish_orphan(domain_addr, new_generation=False,
@@ -634,19 +634,19 @@ def test_republish_same_generation_orphan_from_same_client(server):
 
 
 @pytest.mark.fast
-def test_republish_new_generation_orphan_from_different_client(server):
+def test_republish_new_generation_orphan_from_different_client_id(server):
     domain_addr = server.random_domain().random_addr()
     run_republish_orphan(domain_addr, new_generation=True)
 
 
 @pytest.mark.fast
-def test_republish_same_generation_orphan_from_different_client(server):
+def test_republish_same_generation_orphan_from_different_client_id(server):
     domain_addr = server.random_domain().random_addr()
     run_republish_orphan(domain_addr, new_generation=False)
 
 
 @pytest.mark.fast
-def test_orphan_unaffected_by_same_client_wrong_user(tls_server):
+def test_orphan_causes_rejection_of_client_with_new_user_id(tls_server):
     domain_addr = tls_server.default_domain().default_addr()
     client_id = client.allocate_client_id()
 
@@ -667,9 +667,9 @@ def test_orphan_unaffected_by_same_client_wrong_user(tls_server):
     time.sleep(service_ttl / 2)
 
     os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[1]
-    conn_non_owner = client.connect(domain_addr, client_id=client_id)
-    conn_non_owner.ping()
-    conn_non_owner.close()
+
+    with pytest.raises(client.ProtocolError):
+        client.connect(domain_addr, client_id=client_id)
 
     time.sleep(service_ttl / 2 + 0.25)
 
@@ -680,6 +680,12 @@ def test_orphan_unaffected_by_same_client_wrong_user(tls_server):
     assert len(conn.services()) == 0
 
     conn.close()
+
+    # after the orphaned service has timed out, the client should be
+    # able to connect
+    non_owner = client.connect(domain_addr, client_id=client_id)
+    non_owner.ping()
+    non_owner.close()
 
 
 @pytest.mark.fast
