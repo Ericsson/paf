@@ -96,10 +96,49 @@ class MatchPrinter:
             print("Subscription %x canceled." % self.sub_id)
 
 
+class Tracker:
+    def __init__(self, conn):
+        self.conn = conn
+        self.accepted = False
+        self.failed = False
+        self.ta_id = self.conn.track(self)
+        self.queries = collections.deque()
+
+    def __call__(self, ta_id, event, *args, **optargs):
+        if event == client.EventType.ACCEPT:
+            self.accepted = True
+        elif event == client.EventType.FAIL:
+            self.fail_reason = optargs.get('fail_reason')
+            self.failed = True
+        elif event == client.EventType.NOTIFY:
+            track_type = args[0]
+            if track_type == client.TRACK_TYPE_QUERY:
+                self.conn.track_reply(ta_id)
+                print("Responded to track query notification.")
+            else:
+                if len(self.queries) > 0:
+                    latency = time.time() - self.queries.popleft()
+                    print("Received reply to track query in %.1f ms." %
+                          (latency * 1e3))
+                else:
+                    print("WARNING: Received unsolicited track query reply.")
+
+        elif event == client.EventType.COMPLETE:
+            print("Tracking completed.")
+
+    def query(self):
+        if self.accepted:
+            self.conn.track_query(self.ta_id)
+            self.queries.append(time.time())
+        else:
+            print("Track transaction not yet accepted.")
+
+
 class Worker(Thread):
     def __init__(self, conn):
         Thread.__init__(self)
         self.conn = conn
+        self.tracker = None
 
         rfd, wfd = os.pipe()
 
@@ -172,6 +211,23 @@ class Worker(Thread):
 
     def cmd_hello(self):
         self.dispatch_fun(self._cmd_hello)
+
+    def _cmd_track(self):
+        if self.tracker is None:
+            self.tracker = Tracker(self.conn)
+
+            client.wait(self.conn,
+                        lambda: self.tracker.accepted or self.tracker.failed)
+
+            if self.tracker.accepted:
+                self._ok()
+            else:
+                self._fail(self.tracker.fail_reason)
+        else:
+            self.tracker.query()
+
+    def cmd_track(self):
+        self.dispatch_fun(self._cmd_track)
 
     def _cmd_clients(self):
         try:
@@ -360,6 +416,25 @@ class PafCli(cmd.Cmd):
         """hello
         Ask server for client id and version information."""
         self.worker.cmd_hello()
+
+    def do_track(self, line):
+        """track
+        Initiate track transaction.
+
+        The purpose of a track transaction is to allow the server and the
+        client to ensure that the remote peer is still alive.
+
+        The first use of this command initiates a track protocol transaction.
+
+        Subsequently use of this command results in a track query being sent
+        to the server.
+
+        pafc will reply to any track queries received from the server within
+        the track transaction, and notify the user that so has been done.
+
+        This command is only available on protocol version 3 connections.
+"""
+        self.worker.cmd_track()
 
     def do_services(self, line):
         """services [<filter-expression>]

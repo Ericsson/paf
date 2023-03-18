@@ -33,8 +33,12 @@ class NotFoundError(Error):
 
 
 class AlreadyExistsError(Error):
-    def __init__(self,  obj_type, obj_id):
-        Error.__init__(self, "%s id %d already exists" % (obj_type, obj_id))
+    def __init__(self,  obj_type, obj_id=None):
+        if obj_id is not None:
+            msg = "%s id %d already exists" % (obj_type, obj_id)
+        else:
+            msg = "%s already exists" % obj_type
+        Error.__init__(self, msg)
 
 
 class UserIdChanged(PermissionError):
@@ -284,13 +288,30 @@ def assure_not_connected(fun):
     return assure_state(fun, False)
 
 
+WARNING_THRESHOLD = 0.75
+MIN_IDLE_TIME = 2
+
+
+class IdleState(enum.Enum):
+    ACTIVE = enum.auto()
+    TENTATIVE = enum.auto()
+    TIMED_OUT = enum.auto()
+
+
 class Connection:
-    def __init__(self, client):
+    def __init__(self, client, timer_manager, max_idle_time, idle_cb):
         self.client = client
+        self.timer_manager = timer_manager
+        self.max_idle_time = max_idle_time
+        self.idle_cb = idle_cb
+        self.track_query_cb = None
         self.subscriptions = {}
         self.services = {}
         self.connected_at = time.time()
         self.disconnected_at = None
+        self.idle_state = IdleState.ACTIVE
+        self.idle_timer = None
+        self.install_idle_warning_timer()
 
     def client_id(self):
         return self.client.client_id
@@ -327,15 +348,69 @@ class Connection:
     def get_services(self):
         return self.services.values()
 
+    def get_lowest_ttl(self):
+        return min([service.ttl() for service in self.services.values()])
+
     def is_connected(self):
         return self.disconnected_at is None
 
     @assure_connected
-    def mark_disconnected(self):
+    def disconnected(self):
         self.disconnected_at = time.time()
+        self.uninstall_idle_timer()
 
     def is_stale(self):
         return not self.is_connected() and len(self.services) == 0
+
+    def active(self):
+        if self.idle_state != IdleState.TIMED_OUT:
+            self.idle_state = IdleState.ACTIVE
+            self.install_idle_warning_timer()
+
+    def check_idle(self):
+        if self.idle_state == IdleState.ACTIVE:
+            self.issue_idle_warning()
+
+    def install_idle_timer(self, t):
+        self.uninstall_idle_timer()
+        self.idle_timer = \
+            self.timer_manager.add(self.idle_timer_fired, t, relative=True)
+
+    def idle_time(self):
+        t = self.max_idle_time
+        if len(self.services) > 0:
+            t = min(t, self.get_lowest_ttl())
+        t = max(t, MIN_IDLE_TIME)
+        return t
+
+    def install_idle_warning_timer(self):
+        self.install_idle_timer(WARNING_THRESHOLD * self.idle_time())
+
+    def install_idle_timeout_timer(self):
+        self.install_idle_timer((1 - WARNING_THRESHOLD) * self.idle_time())
+
+    def uninstall_idle_timer(self):
+        if self.idle_timer is not None:
+            self.timer_manager.remove(self.idle_timer)
+            self.idle_timer = None
+
+    def issue_idle_warning(self):
+        self.idle_state = IdleState.TENTATIVE
+        self.idle_cb(self.client, True)
+        self.install_idle_timeout_timer()
+
+    def issue_idle_timeout(self):
+        self.idle_state = IdleState.TIMED_OUT
+        self.idle_cb(self.client, False)
+
+    def idle_timer_fired(self):
+        self.idle_timer = None
+
+        if self.idle_state == IdleState.ACTIVE:
+            self.issue_idle_warning()
+        else:
+            assert self.idle_state == IdleState.TENTATIVE
+            self.issue_idle_timeout()
 
 
 class DB:
@@ -391,11 +466,13 @@ class DB:
 
 
 class Client:
-    def __init__(self, client_id, user_id, db, resource_manager):
+    def __init__(self, client_id, user_id, db, resource_manager,
+                 timer_manager):
         self.client_id = client_id
         self.user_id = user_id
         self.db = db
         self.resource_manager = resource_manager
+        self.timer_manager = timer_manager
         self.active_connection = None
         self.inactive_connections = []
 
@@ -408,8 +485,12 @@ class Client:
                 return False
         return True
 
-    def connect(self, user_id):
+    def connect(self, user_id, max_idle_time, conn_idle_cb):
         if self.is_connected():
+            # The active connection may be down but this has not yet
+            # noticed by the server.
+            self.check_idle()
+
             raise AlreadyExistsError("client", self.client_id)
         elif self.user_id != user_id:
             raise UserIdChanged(self.client_id, user_id, self.user_id)
@@ -418,7 +499,8 @@ class Client:
 
         self.db.add_client(self)
 
-        self.active_connection = Connection(self)
+        self.active_connection = \
+            Connection(self, self.timer_manager, max_idle_time, conn_idle_cb)
 
     @assure_connected
     def disconnect(self):
@@ -426,7 +508,7 @@ class Client:
         self.active_connection = None
         self.inactive_connections.append(inactivated)
 
-        inactivated.mark_disconnected()
+        inactivated.disconnected()
 
         for subscription in list(inactivated.get_subscriptions()):
             self.remove_subscription(subscription)
@@ -507,6 +589,9 @@ class Client:
 
                 self.db.add_service(service)
 
+        # give opportunity to recalcute idle timer based on changed TTL
+        self.active()
+
         return service
 
     @assure_connected
@@ -523,6 +608,17 @@ class Client:
         owner = self.db.get_client(service.client_id())
 
         owner.remove_service(service)
+
+        # give opportunity to recalcute idle timer based on changed TTL
+        self.active()
+
+    @assure_connected
+    def active(self):
+        self.active_connection.active()
+
+    @assure_connected
+    def check_idle(self):
+        self.active_connection.check_idle()
 
     def get_connections(self):
         if self.active_connection is not None:
@@ -560,6 +656,12 @@ class Client:
         self.db.remove_service(service)
 
         service.remove()
+
+    def track(self, query_cb):
+        if self.active_connection.is_tracked():
+            raise AlreadyExistsError("track")
+
+        self.active_connection.track(query_cb)
 
     def create_subscription(self, sub_id, filter, match_cb):
         if self.db.has_subscription(sub_id):
@@ -619,18 +721,24 @@ class ServiceDiscovery:
         self.db = DB()
         self.orphan_timers = {}
 
-    def client_connect(self, client_id, user_id):
+    def client_connect(self, client_id, user_id, max_idle_time,
+                       conn_idle_cb):
         client = self.db.get_client(client_id)
 
         if client is None:
-            client = Client(client_id, user_id, self.db, self.resource_manager)
+            client = Client(client_id, user_id, self.db, self.resource_manager,
+                            self.timer_manager)
 
-        client.connect(user_id)
+        client.connect(user_id, max_idle_time, conn_idle_cb)
 
     def client_disconnect(self, client_id):
         client = self._get_connected_client(client_id)
 
         client.disconnect()
+
+    def client_active(self, client_id):
+        client = self.db.get_client(client_id)
+        client.active()
 
     def has_client(self, client_id):
         return self.db.has_client(client_id)
@@ -645,6 +753,11 @@ class ServiceDiscovery:
             raise NotFoundError("client", client_id)
 
         return client
+
+    def track(self, client_id, query_cb):
+        client = self._get_connected_client(client_id)
+
+        client.track(query_cb)
 
     def publish(self, client_id, service_id, generation, service_props, ttl):
         client = self._get_connected_client(client_id)

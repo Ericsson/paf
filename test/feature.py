@@ -10,3 +10,4 @@ class ServerFeature(Enum):
     MULTI_SOCKET_DOMAIN = auto()
     HOOK = auto()
     ACCESS_CONTROL = auto()
+    PROTO_V3 = auto()

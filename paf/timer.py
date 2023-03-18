@@ -13,7 +13,10 @@ class TimerManager:
     def empty(self):
         return len(self.deque) == 0
 
-    def add(self, handler, expiration_time):
+    def add(self, handler, expiration_time, relative=False):
+        if relative:
+            expiration_time += time.time()
+
         new_timer = Timer(handler, expiration_time)
 
         idx = self._allocate_idx(expiration_time)

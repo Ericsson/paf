@@ -1,18 +1,28 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright(c) 2020 Ericsson AB
 
-from enum import Enum
+from enum import Enum, auto
 import collections
 
-VERSION = 2
+MIN_VERSION = 2
+MAX_VERSION = 3
+VERSIONS = range(MIN_VERSION, MAX_VERSION + 1)
+VERSION_RANGE = (MIN_VERSION, MAX_VERSION)
 
 MSG_TYPE_REQUEST = 'request'
 MSG_TYPE_ACCEPT = 'accept'
 MSG_TYPE_NOTIFY = 'notify'
+MSG_TYPE_INFORM = 'inform'
 MSG_TYPE_COMPLETE = 'complete'
 MSG_TYPE_FAIL = 'fail'
 
+CLIENT_GENERATED_MSG_TYPES = \
+    {MSG_TYPE_REQUEST, MSG_TYPE_INFORM}
+SERVER_GENERATED_MSG_TYPES = \
+    {MSG_TYPE_ACCEPT, MSG_TYPE_NOTIFY, MSG_TYPE_COMPLETE, MSG_TYPE_FAIL}
+
 CMD_HELLO = 'hello'
+CMD_TRACK = 'track'
 CMD_SUBSCRIBE = 'subscribe'
 CMD_UNSUBSCRIBE = 'unsubscribe'
 CMD_SUBSCRIPTIONS = 'subscriptions'
@@ -125,6 +135,11 @@ FIELD_PROTO_MIN_VERSION = NonNegativeIntField('protocol-minimum-version')
 FIELD_PROTO_MAX_VERSION = NonNegativeIntField('protocol-maximum-version')
 FIELD_PROTO_VERSION = NonNegativeIntField('protocol-version')
 
+FIELD_TRACK_TYPE = StringField('track-type')
+
+TRACK_TYPE_QUERY = 'query'
+TRACK_TYPE_REPLY = 'reply'
+
 FIELD_SERVICE_PROPS = PropsField('service-props')
 FIELD_SERVICE_ID = NonNegativeIntField('service-id')
 FIELD_GENERATION = NonNegativeIntField('generation')
@@ -147,6 +162,7 @@ MATCH_TYPE_MODIFIED = 'modified'
 MATCH_TYPE_DISAPPEARED = 'disappeared'
 
 FAIL_REASON_NO_HELLO = 'no-hello'
+FAIL_REASON_TRACK_EXISTS = 'track-exists'
 FAIL_REASON_CLIENT_ID_EXISTS = 'client-id-exists'
 FAIL_REASON_INVALID_FILTER_SYNTAX = 'invalid-filter-syntax'
 FAIL_REASON_SUBSCRIPTION_ID_EXISTS = 'subscription-id-exists'
@@ -160,20 +176,41 @@ FAIL_REASON_INSUFFICIENT_RESOURCES = 'insufficient-resources'
 
 
 class InteractionType(Enum):
-    SINGLE_RESPONSE = 0
-    MULTI_RESPONSE = 1
+    SINGLE_RESPONSE = auto()
+    MULTI_RESPONSE = auto()
+    TWO_WAY = auto()
 
 
 TA_TYPES = {}
 
 
+def register_type(ta_type, proto_versions):
+    for proto_version in proto_versions:
+        if proto_version not in TA_TYPES:
+            TA_TYPES[proto_version] = {}
+        TA_TYPES[proto_version][ta_type.cmd] = ta_type
+
+
+def lookup_type(proto_version, ta_cmd):
+    t = TA_TYPES[proto_version].get(ta_cmd)
+
+    if t is None:
+        raise ProtocolError("Unknown protocol command \"%s\"" % ta_cmd)
+
+    return t
+
+
 class TransactionType:
-    def __init__(self, cmd, ia_type, request_fields=[],
+    def __init__(self, cmd, ia_type,
+                 proto_versions=VERSIONS,
+                 request_fields=[],
                  opt_request_fields=[],
                  accept_fields=[],
                  opt_accept_fields=[],
                  notify_fields=[],
                  opt_notify_fields=[],
+                 inform_fields=[],
+                 opt_inform_fields=[],
                  complete_fields=[],
                  opt_complete_fields=[],
                  fail_fields=[],
@@ -186,11 +223,32 @@ class TransactionType:
         self.opt_accept_fields = opt_accept_fields
         self.notify_fields = notify_fields
         self.opt_notify_fields = opt_notify_fields
+        self.inform_fields = inform_fields
+        self.opt_inform_fields = opt_inform_fields
         self.complete_fields = complete_fields
         self.opt_complete_fields = opt_complete_fields
         self.fail_fields = fail_fields
         self.opt_fail_fields = opt_fail_fields
-        TA_TYPES[cmd] = self
+
+        self.fields = {
+            MSG_TYPE_REQUEST: request_fields,
+            MSG_TYPE_ACCEPT: accept_fields,
+            MSG_TYPE_NOTIFY: notify_fields,
+            MSG_TYPE_INFORM: inform_fields,
+            MSG_TYPE_COMPLETE: complete_fields,
+            MSG_TYPE_FAIL: fail_fields
+        }
+
+        self.opt_fields = {
+            MSG_TYPE_REQUEST: opt_request_fields,
+            MSG_TYPE_ACCEPT: opt_accept_fields,
+            MSG_TYPE_NOTIFY: opt_notify_fields,
+            MSG_TYPE_INFORM: opt_inform_fields,
+            MSG_TYPE_COMPLETE: opt_complete_fields,
+            MSG_TYPE_FAIL: opt_fail_fields
+        }
+
+        register_type(self, proto_versions)
 
 
 TA_HELLO = TransactionType(
@@ -200,6 +258,15 @@ TA_HELLO = TransactionType(
         FIELD_CLIENT_ID, FIELD_PROTO_MIN_VERSION, FIELD_PROTO_MAX_VERSION
     ],
     complete_fields=[FIELD_PROTO_VERSION],
+    opt_fail_fields=[FIELD_FAIL_REASON]
+)
+
+TA_TRACK = TransactionType(
+    CMD_TRACK,
+    InteractionType.TWO_WAY,
+    proto_versions=[3],
+    notify_fields=[FIELD_TRACK_TYPE],
+    inform_fields=[FIELD_TRACK_TYPE],
     opt_fail_fields=[FIELD_FAIL_REASON]
 )
 

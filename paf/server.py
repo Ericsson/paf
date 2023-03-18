@@ -3,6 +3,8 @@
 
 import json
 from collections import deque
+from enum import Enum, auto
+from itertools import chain
 import errno
 import time
 
@@ -17,72 +19,103 @@ import paf.timer
 from paf.logging import LogCategory, debug, info, warning
 
 MAJOR_VERSION = 1
-MINOR_VERSION = 0
-PATCH_VERSION = 6
+MINOR_VERSION = 1
+PATCH_VERSION = 0
 
 VERSION = "%d.%d.%d" % (MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)
 
 
-class Transaction:
-    def __init__(self, debug):
-        self.debug = debug
-
-    def request(self, in_wire_msg):
+class Message:
+    @staticmethod
+    def parse(proto_version, in_wire_msg):
+        if proto_version is None:
+            # provisonal version, to recognize hello
+            proto_version = proto.MIN_VERSION
         try:
             in_msg = json.loads(in_wire_msg.decode('utf-8'))
-            ta_cmd = proto.FIELD_TA_CMD.pull(in_msg)
-            self.ta_id = proto.FIELD_TA_ID.pull(in_msg)
+
+            cmd = proto.FIELD_TA_CMD.pull(in_msg)
+            ta_id = proto.FIELD_TA_ID.pull(in_msg)
             msg_type = proto.FIELD_MSG_TYPE.pull(in_msg)
 
-            if msg_type != proto.MSG_TYPE_REQUEST:
+            ta_type = proto.lookup_type(proto_version, cmd)
+
+            fields = ta_type.fields.get(msg_type)
+            opt_fields = ta_type.opt_fields.get(msg_type)
+
+            if fields is None:
                 raise proto.ProtocolError("Incoming request is of invalid "
                                           "type \"%s\"" % msg_type)
 
-            self.ta_type = self.lookup_type(ta_cmd)
+            args = []
+            for field in fields:
+                args.append(field.pull(in_msg))
 
-            self.debug("Processing \"%s\" command request with transaction "
-                       "id %d." % (self.ta_type.cmd, self.ta_id),
-                       LogCategory.PROTOCOL)
-
-            request_args = []
-            for field in self.ta_type.request_fields:
-                request_args.append(field.pull(in_msg))
-
-            opt_request_args = {}
-            for field in self.ta_type.opt_request_fields:
+            optargs = {}
+            for field in opt_fields:
                 arg = field.pull(in_msg, opt=True)
                 if arg is not None:
-                    opt_request_args[field.name] = arg
+                    optargs[field.name] = arg
 
             if len(in_msg) > 0:
-                raise ProtocolError("Request contains unknown fields: %s" %
+                raise ProtocolError("Message contains unknown field(s): %s" %
                                     in_msg)
 
-            return request_args, opt_request_args
+            return Message(ta_type, ta_id, msg_type, args, optargs)
+
         except ValueError:
             raise ProtocolError("Error JSON decoding incoming message")
 
-    def lookup_type(self, ta_cmd):
-        t = proto.TA_TYPES.get(ta_cmd)
-        if t is None:
-            raise proto.ProtocolError("Client issued unknown command "
-                                      "\"%s\"" % ta_cmd)
-        return t
+    def __init__(self, ta_type, ta_id, msg_type, args, optargs):
+        self.ta_type = ta_type
+        self.ta_id = ta_id
+        self.msg_type = msg_type
+        self.args = args
+        self.optargs = optargs
 
-    def response(self, msg_type, fields, opt_fields, *args, **optargs):
+    def cmd(self):
+        return self.ta_type.cmd
+
+    def is_request(self):
+        return self.msg_type == proto.MSG_TYPE_REQUEST
+
+    def is_accept(self):
+        return self.msg_type == proto.MSG_TYPE_ACCEPT
+
+    def is_notify(self):
+        return self.msg_type == proto.MSG_TYPE_NOTIFY
+
+    def is_inform(self):
+        return self.msg_type == proto.MSG_TYPE_INFORM
+
+    def is_complete(self):
+        return self.msg_type == proto.MSG_TYPE_COMPLETE
+
+    def is_fail(self):
+        return self.msg_type == proto.MSG_TYPE_FAIL
+
+    def is_server_generated(self):
+        return self.msg_type in proto.SERVER_GENERATED_MSG_TYPES
+
+    def is_client_generated(self):
+        return self.msg_type in proto.CLIENT_GENERATED_MSG_TYPES
+
+    def to_wire(self):
         out_msg = {}
 
-        self.debug("Responding with message type \"%s\" in transaction %d." %
-                   (msg_type, self.ta_id), LogCategory.PROTOCOL)
+        fields = self.ta_type.fields[self.msg_type]
+        opt_fields = self.ta_type.opt_fields[self.msg_type]
 
         proto.FIELD_TA_CMD.put(self.ta_type.cmd, out_msg)
         proto.FIELD_TA_ID.put(self.ta_id, out_msg)
-        proto.FIELD_MSG_TYPE.put(msg_type, out_msg)
+        proto.FIELD_MSG_TYPE.put(self.msg_type, out_msg)
 
-        assert len(args) == len(fields)
+        assert len(self.args) == len(fields)
+
         for i, field in enumerate(fields):
-            field.put(args[i], out_msg)
+            field.put(self.args[i], out_msg)
 
+        optargs = self.optargs.copy()
         for opt_field in opt_fields:
             opt_name = opt_field.python_name()
             if opt_name in optargs:
@@ -95,31 +128,118 @@ class Transaction:
         out_wire_msg = json.dumps(out_msg).encode('utf-8')
         return out_wire_msg
 
+
+class TransactionState(Enum):
+    IDLE = auto()
+    REQUESTED = auto()
+    ACCEPTED = auto()
+    FAILED = auto()
+    COMPLETED = auto()
+
+
+class Transaction:
+    def __init__(self, ta_id, ta_type, proto_version, debug, term_cb):
+        self.ta_id = ta_id
+        self.ta_type = ta_type
+        self.proto_version = proto_version
+        self.debug = debug
+        self.term_cb = term_cb
+        self.state = TransactionState.IDLE
+
+    def message(self, in_msg):
+        if not in_msg.is_client_generated():
+            raise ProtocolError("Message received in transaction %d is not "
+                                "of a client-generated type" % self.ta_id)
+
+        if in_msg.is_request():
+            self.request(in_msg)
+        else:
+            assert in_msg.is_inform()
+            self.inform(in_msg)
+
+    def request(self, in_msg):
+        if self.state == TransactionState.ACCEPTED:
+            raise ProtocolError("Received duplicate request message in "
+                                "transaction %d" % self.ta_id)
+
+        assert self.state == TransactionState.IDLE
+
+        self.state = TransactionState.REQUESTED
+
+    def inform(self, in_msg):
+        if self.state == TransactionState.IDLE:
+            raise ProtocolError("Inform message precedes request in "
+                                "transaction %d" % self.ta_id)
+
+        assert self.state == TransactionState.ACCEPTED
+
+    def response(self, msg_type, fields, opt_fields, *args, **optargs):
+        self.debug("Responding with message type \"%s\" in transaction %d." %
+                   (msg_type, self.ta_id), LogCategory.PROTOCOL)
+
+        out_msg = Message(self.ta_type, self.ta_id, msg_type, args, optargs)
+
+        return out_msg.to_wire()
+
     def complete(self, *args, **optargs):
+        if self.is_single_response():
+            assert self.state == TransactionState.REQUESTED
+        else:
+            assert self.state == TransactionState.ACCEPTED
+
+        self.state = TransactionState.COMPLETED
+
+        self.terminate()
+
         return self.response(proto.MSG_TYPE_COMPLETE,
                              self.ta_type.complete_fields,
                              self.ta_type.opt_complete_fields,
                              *args, **optargs)
 
     def fail(self, *args, **optargs):
+        assert self.state != TransactionState.IDLE
+
+        self.state = TransactionState.FAILED
+
+        self.terminate()
+
         return self.response(proto.MSG_TYPE_FAIL,
                              self.ta_type.fail_fields,
                              self.ta_type.opt_fail_fields,
                              *args, **optargs)
 
+        self.terminate()
+
     def accept(self, *args, **optargs):
-        assert self.ta_type.ia_type == proto.InteractionType.MULTI_RESPONSE
+        assert self.is_multi_response() or self.is_two_way()
+
+        self.state = TransactionState.ACCEPTED
+
         return self.response(proto.MSG_TYPE_ACCEPT,
                              self.ta_type.accept_fields,
                              self.ta_type.opt_accept_fields,
                              *args, **optargs)
 
     def notify(self, *args, **optargs):
-        assert self.ta_type.ia_type == proto.InteractionType.MULTI_RESPONSE
+        assert self.is_multi_response() or self.is_two_way()
+
         return self.response(proto.MSG_TYPE_NOTIFY,
                              self.ta_type.notify_fields,
                              self.ta_type.opt_notify_fields,
                              *args, **optargs)
+
+    def terminate(self):
+        if self.term_cb is not None:
+            self.term_cb(self)
+
+    def is_single_response(self):
+        return self.ta_type.ia_type == proto.InteractionType.SINGLE_RESPONSE
+
+    def is_multi_response(self):
+        return self.ta_type.ia_type == proto.InteractionType.MULTI_RESPONSE
+
+    def is_two_way(self):
+        return self.ta_type.ia_type == proto.InteractionType.TWO_WAY
 
 
 MAX_SEND_BATCH = 64
@@ -129,8 +249,9 @@ SOFT_OUT_WIRE_LIMIT = 128
 
 class Connection:
     def __init__(self, sd, conn_sock, event_loop, server, handshake_cb,
-                 term_cb):
+                 max_idle_time, idle_cb, term_cb):
         self.client_id = None
+        self.proto_version = None
         self.conn_addr = conn_sock.get_attr("xcm.remote_addr")
         self.sd = sd
         self.conn_sock = conn_sock
@@ -139,12 +260,16 @@ class Connection:
         self.event_loop = event_loop
         self.server = server
         self.handshake_cb = handshake_cb
+        self.max_idle_time = max_idle_time
+        self.idle_cb = idle_cb
         self.term_cb = term_cb
         self.update_source()
         self.event_loop.add(self.conn_source, self.activate)
+        self.tas = {}
         self.sub_tas = {}
         self.connect_time = time.time()
         self.handshaked = False
+        self.track_ta_id = None
         self.info("Accepted new client connection from \"%s\"." %
                   self.conn_addr, LogCategory.PROTOCOL)
 
@@ -174,7 +299,7 @@ class Connection:
         return len(self.out_wire_msgs) > 0
 
     def receivable(self):
-        # avoid accepting more work (requests) if already a lot of
+        # Don't accept more work (requests or informs) in case many
         # messages are enroute to the client
         return len(self.out_wire_msgs) < SOFT_OUT_WIRE_LIMIT
 
@@ -223,16 +348,32 @@ class Connection:
                 raise xcm.error(0, "Connection closed")
             self.debug("Received message: %s" % in_wire_msg,
                        LogCategory.PROTOCOL)
-            self.request(in_wire_msg)
+            self.process(in_wire_msg)
         except xcm.error as e:
             if e.errno != errno.EAGAIN:
                 raise
 
-    def request(self, in_wire_msg):
-        ta = Transaction(self.debug)
-        args, optargs = ta.request(in_wire_msg)
-        if ta.ta_type.cmd == proto.CMD_HELLO or self.handshaked:
-            for response in self.invoke_handler(ta, args, optargs):
+    def process(self, in_wire_msg):
+        in_msg = Message.parse(self.proto_version, in_wire_msg)
+
+        ta = self.tas.get(in_msg.ta_id)
+
+        if ta is None:
+            ta = Transaction(in_msg.ta_id, in_msg.ta_type, self.proto_version,
+                             self.debug, self.ta_terminated)
+            self.tas[ta.ta_id] = ta
+
+        ta.message(in_msg)
+
+        if in_msg.cmd() == proto.CMD_HELLO or self.handshaked:
+            self.debug("Processing \"%s\" command %s with transaction "
+                       "id %d." % (in_msg.ta_type.cmd, in_msg.msg_type,
+                                   in_msg.ta_id), LogCategory.PROTOCOL)
+
+            if self.handshaked:
+                self.sd.client_active(self.client_id)
+
+            for response in self.invoke_handler(ta, in_msg):
                 self.respond(response)
         else:
             self.warning("Attempt to issue \"%s\" before issuing \"%s\"." %
@@ -240,10 +381,18 @@ class Connection:
                          LogCategory.SECURITY)
             self.respond(ta.fail(fail_reason=proto.FAIL_REASON_NO_HELLO))
 
-    def invoke_handler(self, ta, args, optargs):
-        fun_name = "%s_request" % ta.ta_type.cmd.replace("-", "_")
+    def ta_terminated(self, ta):
+        del self.tas[ta.ta_id]
+
+    def invoke_handler(self, ta, in_msg):
+        if in_msg.is_request():
+            handler_type = "request"
+        else:
+            handler_type = "inform"
+
+        fun_name = "%s_%s" % (in_msg.cmd().replace("-", "_"), handler_type)
         fun = getattr(self, fun_name)
-        return fun(ta, *args, **optargs)
+        return fun(ta, *in_msg.args, **in_msg.optargs)
 
     def determine_user_id(self):
         user_id = None
@@ -279,7 +428,7 @@ class Connection:
             self.debug("Received hello from client with handshake "
                        "procedure already successfully completed.",
                        LogCategory.PROTOCOL)
-            yield ta.complete(proto.VERSION)
+            yield ta.complete(self.proto_version)
             return
         if min_version == max_version:
             self.debug("Client supports protocol version %d (only)." %
@@ -288,16 +437,26 @@ class Connection:
             self.debug("Client supports protocol versions between "
                        "%d and %d." % (min_version, max_version),
                        LogCategory.PROTOCOL)
+
         user_id = self.determine_user_id()
         self.info("User id is \"%s\"." % user_id, LogCategory.SECURITY)
-        if proto.VERSION >= min_version and proto.VERSION <= max_version:
+
+        self.proto_version = \
+            self.server.select_proto_version(min_version, max_version)
+
+        if self.proto_version is not None:
             try:
-                self.sd.client_connect(self.client_id, user_id)
+                self.sd.client_connect(self.client_id, user_id,
+                                       self.max_idle_time, self.idle_cb)
                 self.debug("Handshake producedure finished for client from "
                            "\"%s\"." % self.conn_addr, LogCategory.PROTOCOL)
+                self.debug("Protocol version %d is selected." %
+                           self.proto_version, LogCategory.PROTOCOL)
                 self.handshaked = True
                 self.handshake_cb(self)
-                yield ta.complete(proto.VERSION)
+                yield ta.complete(self.proto_version)
+
+                self.configure_tcp_keepalive()
             except sd.AlreadyExistsError:
                 # There's a race between which of client and server
                 # sees that the connection is down. If the client
@@ -319,10 +478,38 @@ class Connection:
                 reason = proto.FAIL_REASON_INSUFFICIENT_RESOURCES
                 yield ta.fail(fail_reason=reason)
         else:
-            self.warning("Client doesn't support protocol version %d." %
-                         proto.VERSION, LogCategory.PROTOCOL)
+            self.warning("Client doesn't support a protocol version in "
+                         "the range %d - %d." % (proto.MIN_VERSION,
+                                                 proto.MAX_VERSION),
+                         LogCategory.PROTOCOL)
             reason = proto.FAIL_REASON_UNSUPPORTED_PROTOCOL_VERSION
             yield ta.fail(fail_reason=reason)
+
+    def is_tracked(self):
+        return self.track_ta_id is not None and self.track_ta_id in self.tas
+
+    def track_request(self, ta):
+        if self.is_tracked():
+            self.warning("Track transaction already exists.",
+                         LogCategory.PROTOCOL)
+            reason = proto.FAIL_REASON_TRACK_EXISTS
+            yield ta.fail(fail_reason=reason)
+        else:
+            self.track_ta_id = ta.ta_id
+            self.debug("Installed tracker.", LogCategory.CORE)
+            yield ta.accept()
+
+    def track_inform(self, ta, track_type):
+        if track_type == proto.TRACK_TYPE_QUERY:
+            yield ta.notify(proto.TRACK_TYPE_REPLY)
+            self.debug("Replied to track query.", LogCategory.CORE)
+        elif track_type == proto.TRACK_TYPE_REPLY:
+            self.debug("Received to track query reply.", LogCategory.CORE)
+            # XXX: assure that there was an outstanding query
+        else:
+            raise ProtocolError("Received unknown track type \"%s\" in "
+                                "track transaction %d", track_type,
+                                ta.ta_id)
 
     def subscribe_request(self, ta, sub_id, filter=None):
         try:
@@ -482,10 +669,15 @@ class Connection:
 
     def clients_request(self, ta):
         yield ta.accept()
-        for conn in self.server.client_connections:
+        for conn in self.server.client_connections.values():
             yield ta.notify(conn.client_id, conn.conn_addr,
                             int(conn.connect_time))
         yield ta.complete()
+
+    def track_query(self, ta):
+        # To avoid multiple outstanding queries, one could introduce
+        # a counter and ignore superflous requests
+        self.respond(ta.notify(proto.TRACK_TYPE_QUERY))
 
     def subscription_triggered(self, sub_id, match_type, service):
         subscription = self.server.sd.get_subscription(sub_id)
@@ -519,6 +711,13 @@ class Connection:
         self.out_wire_msgs.append(out_wire_msg)
         self.update_source()
 
+    def configure_tcp_keepalive(self):
+        tp = self.conn_sock.get_attr("xcm.transport")
+
+        if self.proto_version >= 3 and tp in ("tls", "tcp"):
+            self.conn_sock.set_attr("tcp.keepalive", False)
+            self.debug("TCP keepalive disabled.", LogCategory.PROTOCOL)
+
     def terminate(self):
         self.info("Disconnected.", LogCategory.PROTOCOL)
         if self.handshaked:
@@ -528,6 +727,19 @@ class Connection:
         self.conn_sock = None
         self.conn_source = None
         self.term_cb(self)
+
+    def check_idle(self):
+        # In Pathfinder protocol versions prior to 3, the transport
+        # connection is used as an indication of the remote peer being
+        # alive. If the connection is alive, the client is alive.
+        if self.proto_version < 3:
+            self.sd.client_active(self.client_id)
+        elif self.is_tracked():
+            self.track_query(self.tas[self.track_ta_id])
+
+    def time_out(self):
+        self.debug("Client %d timed out." % self.client_id, LogCategory.CORE)
+        self.terminate()
 
 
 CLEAN_INTERVAL = 1
@@ -543,10 +755,11 @@ PAF_TO_XCM_SOCKET_ATTRS = {
 
 class Server:
     def __init__(self, name, sockets, max_user_resources, max_total_resources,
-                 event_loop):
+                 max_idle_time, event_loop):
         self.timer_manager = paf.timer.TimerManager(self.timer_changed)
         self.sd = sd.ServiceDiscovery(name, self.timer_manager,
                                       max_user_resources, max_total_resources)
+        self.max_idle_time = max_idle_time
         self.event_loop = event_loop
         self.server_socks = {}
         for socket in sockets:
@@ -556,7 +769,7 @@ class Server:
         self.timer_source = eventloop.Source()
         self.event_loop.add(self.timer_source, self.timer_activate)
         self.clientless_connections = set()
-        self.client_connections = set()
+        self.client_connections = {}
         self.clean_out_timer = None
 
     def add_socket(self, socket_conf):
@@ -580,6 +793,14 @@ class Server:
         else:
             prefix = ""
         debug("%s%s" % (prefix, msg), category)
+
+    def select_proto_version(self, client_min_version, client_max_version):
+        candidate = min(client_max_version, proto.MAX_VERSION)
+
+        if candidate < proto.MIN_VERSION or candidate < client_min_version:
+            return None
+
+        return candidate
 
     def num_connections(self):
         return len(self.clientless_connections) + len(self.client_connections)
@@ -646,6 +867,7 @@ class Server:
                         self.update_source(source)
                         conn = Connection(self.sd, conn_sock, self.event_loop,
                                           self, self.conn_handshake_completed,
+                                          self.max_idle_time, self.client_idle,
                                           self.conn_terminated)
                         self.clientless_connections.add(conn)
                         self.schedule_clean_out()
@@ -676,30 +898,49 @@ class Server:
 
     def conn_handshake_completed(self, conn):
         self.clientless_connections.remove(conn)
-        self.client_connections.add(conn)
+        self.client_connections[conn.client_id] = conn
 
     def conn_terminated(self, conn):
         if self.max_clients_reached():
             for source in self.server_socks.keys():
                 source.update(xcm.SO_ACCEPTABLE)
-        self.client_connections.discard(conn)
-        self.clientless_connections.discard(conn)
+
+        if conn.handshaked:
+            del self.client_connections[conn.client_id]
+        else:
+            self.clientless_connections.remove(conn)
+
+    def client_idle(self, client, warning):
+        conn = self.client_connections[client.client_id]
+        if warning:
+            self.debug("Performing idle check on client %d" %
+                       client.client_id, LogCategory.PROTOCOL)
+            conn.check_idle()
+        else:
+            self.debug("Connection for client %d timed out" %
+                       client.client_id, LogCategory.PROTOCOL)
+            conn.terminate()
 
     def close_server_socks(self):
         for sock in self.server_socks.values():
             sock.close()
 
     def terminate(self):
-        for connections in (self.clientless_connections,
-                            self.client_connections):
-            while len(connections) > 0:
-                conn = connections.pop()
-                conn.terminate()
+        conns = [conn for conn in chain(self.clientless_connections,
+                                        self.client_connections.values())]
+
+        for conn in conns:
+            conn.terminate()
+
+        assert len(self.clientless_connections) == 0
+        assert len(self.client_connections) == 0
+
         for stream in self.server_socks.keys():
             self.event_loop.remove(stream)
         self.close_server_socks()
 
 
-def create(name, sockets, max_user_resources, max_total_resources, event_loop):
+def create(name, sockets, max_user_resources, max_total_resources,
+           max_idle_time, event_loop):
     return Server(name, sockets, max_user_resources, max_total_resources,
-                  event_loop)
+                  max_idle_time, event_loop)

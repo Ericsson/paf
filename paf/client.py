@@ -17,6 +17,9 @@ MATCH_TYPE_APPEARED = proto.MATCH_TYPE_APPEARED
 MATCH_TYPE_MODIFIED = proto.MATCH_TYPE_MODIFIED
 MATCH_TYPE_DISAPPEARED = proto.MATCH_TYPE_DISAPPEARED
 
+TRACK_TYPE_QUERY = proto.TRACK_TYPE_QUERY
+TRACK_TYPE_REPLY = proto.TRACK_TYPE_REPLY
+
 MAX_MSGS_PER_ROUND = 128
 
 ProtocolError = proto.ProtocolError
@@ -37,8 +40,9 @@ class TransactionError(Error):
 class EventType(Enum):
     ACCEPT = 0
     NOTIFY = 1
-    COMPLETE = 2
-    FAIL = 3
+    INFORM = 2
+    COMPLETE = 3
+    FAIL = 4
 
 
 class TransactionState(Enum):
@@ -81,6 +85,32 @@ class Transaction:
         self.state = TransactionState.REQUESTING
         return request_msg
 
+    def produce_inform(self, inform_args, inform_optargs):
+        assert self.state == TransactionState.ACCEPTED
+
+        inform_msg = {}
+
+        proto.FIELD_TA_CMD.put(self.ta_type.cmd, inform_msg)
+        proto.FIELD_TA_ID.put(self.ta_id, inform_msg)
+        proto.FIELD_MSG_TYPE.put(proto.MSG_TYPE_INFORM, inform_msg)
+
+        assert len(inform_args) == len(self.ta_type.inform_fields)
+
+        for i, field in enumerate(self.ta_type.inform_fields):
+            field_value = inform_args[i]
+            field.put(field_value, inform_msg)
+
+        for opt_field in self.ta_type.opt_inform_fields:
+            if opt_field.name in inform_optargs:
+                field_value = inform_optargs.get(opt_field.python_name())
+                if field_value is not None:
+                    opt_field.put(field_value, inform_msg)
+                del inform_optargs[opt_field.name]
+
+        assert len(inform_optargs) == 0
+
+        return inform_msg
+
     def consume_message(self, in_msg):
         ta_cmd = proto.FIELD_TA_CMD.pull(in_msg)
         if ta_cmd != self.ta_type.cmd:
@@ -92,7 +122,8 @@ class Transaction:
 
         if msg_type == proto.MSG_TYPE_ACCEPT and \
            self.state == TransactionState.REQUESTING and \
-           self.ta_type.ia_type == proto.InteractionType.MULTI_RESPONSE:
+           self.ta_type.ia_type in (proto.InteractionType.MULTI_RESPONSE,
+                                    proto.InteractionType.TWO_WAY):
             event = EventType.ACCEPT
             fields = self.ta_type.accept_fields
             opt_fields = self.ta_type.opt_accept_fields
@@ -212,6 +243,38 @@ class CompleteCall(Call):
         return self.complete
 
 
+class Tracker:
+    def __init__(self, conn):
+        self.conn = conn
+        self.accepted = False
+        self.failed = False
+        self.notification_queries = 0
+        self.inform_queries = 0
+        self.notification_replies = 0
+
+    def __call__(self, ta_id, event, *args, **optargs):
+        if event == EventType.ACCEPT:
+            self.accepted = True
+        elif event == EventType.FAIL:
+            self.fail_reason = optargs.get('fail_reason')
+            self.failed = True
+        elif event == EventType.NOTIFY:
+            track_type = args[0]
+            if track_type == TRACK_TYPE_QUERY:
+                self.conn.track_reply(ta_id)
+                self.notification_queries += 1
+            else:
+                self.notification_replies += 1
+                if self.notification_replies > self.inform_queries:
+                    raise ProtocolError("Received unsolicited track replies")
+
+    def query(self):
+        assert self.accepted
+
+        self.conn.track_query(self.ta_id)
+        self.inform_queries += 1
+
+
 class ServerConf:
     def __init__(self, addr):
         self.addr = addr
@@ -219,7 +282,8 @@ class ServerConf:
 
 
 class Client:
-    def __init__(self, client_id, server_conf, ready_cb):
+    def __init__(self, client_id, server_conf, proto_version_range,
+                 track, ready_cb):
         self.client_id = client_id
         try:
             attrs = {'xcm.blocking': False}
@@ -227,6 +291,11 @@ class Client:
             self.conn_sock = xcm.connect(server_conf.addr, attrs=attrs)
         except xcm.error as e:
             raise TransportError(str(e))
+        self.proto_version_range = proto_version_range
+        if track:
+            self.tracker = Tracker(self)
+        else:
+            self.tracker = None
         self.ready_cb = ready_cb
         self.ta_id = 0
         self.out_wire_msgs = deque()
@@ -240,7 +309,7 @@ class Client:
             raise
 
     def initial_hello(self):
-        self.hello(self.initial_hello_cb)
+        self.hello(response_cb=self.initial_hello_cb)
         if self.ready_cb is None:
             wait(self, criteria=lambda: self.proto_version is not None)
 
@@ -253,21 +322,30 @@ class Client:
                                 reason)
         elif event == EventType.COMPLETE:
             selected_version = args[0]
-            if proto.VERSION != selected_version:
+
+            if selected_version not in proto.VERSIONS:
                 raise ProtocolError("Server selected unsupported "
-                                    "protocol version %d (required %d)"
-                                    % (selected_version, proto.VERSION))
+                                    "protocol version %d (required %d-%d)"
+                                    % (selected_version, proto.MIN_VERSION,
+                                       proto.MAX_VERSION))
             self.proto_version = selected_version
+
+            if self.tracker is not None:
+                self.tracker.ta_id = self.track(self.tracker)
+
             if self.ready_cb is not None:
                 self.ready_cb()
 
     def close(self):
         self.conn_sock.close()
 
-    def hello(self, response_cb=None):
+    def hello(self, proto_version_range=None, response_cb=None):
+        if proto_version_range is None:
+            proto_version_range = self.proto_version_range
+
         return self.issue_request(proto.TA_HELLO,
-                                  (self.client_id, proto.VERSION,
-                                   proto.VERSION), {},
+                                  (self.client_id, proto_version_range[0],
+                                   proto_version_range[1]), {},
                                   CompleteCall, response_cb)
 
     def publish(self, service_id, generation, service_props, ttl,
@@ -283,6 +361,16 @@ class Client:
     def subscribe(self, sub_id, response_cb, filter=None):
         return self.async_request(proto.TA_SUBSCRIBE, (sub_id,),
                                   {'filter': filter}, response_cb)
+
+    def track(self, response_cb):
+        ta_type = proto.lookup_type(self.proto_version, proto.CMD_TRACK)
+        return self.async_request(ta_type, (), (), response_cb)
+
+    def track_query(self, track_ta_id):
+        self.issue_inform(track_ta_id, (proto.TRACK_TYPE_QUERY,), {})
+
+    def track_reply(self, track_ta_id):
+        self.issue_inform(track_ta_id, (proto.TRACK_TYPE_REPLY,), {})
 
     def unsubscribe(self, sub_id, response_cb=None):
         return self.issue_request(proto.TA_UNSUBSCRIBE, (sub_id,), {},
@@ -350,6 +438,13 @@ class Client:
         self.transactions[ta_id] = transaction
         self.try_send()
         return ta_id
+
+    def issue_inform(self, ta_id, inform_args, inform_optargs):
+        transaction = self.transactions[ta_id]
+        inform_msg = transaction.produce_inform(inform_args, inform_optargs)
+        out_wire_msg = json.dumps(inform_msg).encode('utf-8')
+        self.out_wire_msgs.append(out_wire_msg)
+        self.try_send()
 
     def fileno(self):
         return self.conn_sock.fileno()
@@ -495,11 +590,12 @@ def allocate_client_id():
     return random.randint(0, ((1 << 63) - 1))
 
 
-def connect(domain_or_addr_or_conf, client_id=None, ready_cb=None):
+def connect(domain_or_addr_or_conf, client_id=None, ready_cb=None,
+            proto_version_range=proto.VERSION_RANGE, track=False):
     if isinstance(domain_or_addr_or_conf, ServerConf):
         server = domain_or_addr_or_conf
     else:
         server = domain_server(domain_or_addr_or_conf)
     if client_id is None:
         client_id = allocate_client_id()
-    return Client(client_id, server, ready_cb)
+    return Client(client_id, server, proto_version_range, track, ready_cb)

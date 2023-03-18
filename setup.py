@@ -10,7 +10,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="paf",
-    version="1.0.6",
+    version="1.1.0",
     author="Mattias Rönnblom",
     author_email="mattias.ronnblom@ericsson.com",
     description="The Pathfinder Service Discovery Server",

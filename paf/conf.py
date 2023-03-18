@@ -12,6 +12,7 @@ DEFAULT_LOG_FILE_MAX_SIZE = 1000000
 DEFAULT_LOG_SYSLOG = True
 DEFAULT_LOG_FACILITY = logging.handlers.SysLogHandler.LOG_DAEMON
 DEFAULT_LOG_FILTER = logging.INFO
+DEFAULT_MAX_IDLE_TIME = 30
 
 
 class Error(Exception):
@@ -184,8 +185,9 @@ class SocketConf:
 
 
 class DomainConf:
-    def __init__(self, name=None):
+    def __init__(self, name, max_idle_time):
         self.name = name
+        self.max_idle_time = max_idle_time
         self.sockets = []
 
     def add_socket(self, addr, tls_attrs={}):
@@ -197,6 +199,8 @@ class DomainConf:
             s["name"] = self.name
         s["sockets"] = self.sockets
 
+        s["max_idle_time"] = self.max_idle_time
+
         return str(s)
 
 
@@ -206,8 +210,8 @@ class Conf:
         self.domains = []
         self.resources = ResourcesConf()
 
-    def add_domain(self, name=None):
-        domain_conf = DomainConf(name)
+    def add_domain(self, name=None, max_idle_time=DEFAULT_MAX_IDLE_TIME):
+        domain_conf = DomainConf(name, max_idle_time)
         self.domains.append(domain_conf)
         return domain_conf
 
@@ -237,12 +241,14 @@ def assure_type(value, value_type, path):
                     "'%s')" % (path, type(value), value_type))
 
 
-def dict_lookup(dict_value, dict_key, value_type, dict_path, required=False):
+def dict_lookup(dict_value, dict_key, value_type, dict_path, required=False,
+                default=None):
     value = dict_value.get(dict_key)
     if value is None:
         if required:
+            assert default is None
             raise MissingFieldError(dict_path, dict_key)
-        return None
+        return default
 
     assure_type(value, value_type, path(dict_path, dict_key))
 
@@ -285,6 +291,10 @@ def domains_populate(conf, domains, path):
 
         name = dict_lookup(domain, "name", str, domain_path, required=False)
 
+        max_idle_time = dict_lookup(domain, "max_idle_time", int,
+                                    domain_path, default=DEFAULT_MAX_IDLE_TIME,
+                                    required=False)
+
         # 'addrs' is an alternative name, supported for backward
         # compatibility reasons
         sockets = dict_lookup(domain, "addrs", list, domain_path,
@@ -294,7 +304,7 @@ def domains_populate(conf, domains, path):
             sockets = dict_lookup(domain, "sockets", list, domain_path,
                                   required=True)
 
-        domain_conf = conf.add_domain(name)
+        domain_conf = conf.add_domain(name, max_idle_time)
 
         for socket_num, socket in enumerate(sockets):
             socket_path = "%s.sockets[%d]" % (domain_path, socket_num)

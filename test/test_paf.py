@@ -109,9 +109,10 @@ CONFIG_FILE = 'pafd-test.conf'
 
 
 class Domain:
-    def __init__(self, name, addrs):
+    def __init__(self, name, addrs, max_idle_time):
         self.name = name
         self.addrs = addrs
+        self.max_idle_time = max_idle_time
         self.file = "%s/%s" % (DOMAINS_DIR, self.name)
         self.set_mapped_addr(self.default_addr())
 
@@ -164,10 +165,14 @@ class BaseServer:
     def default_domain(self):
         return self.domains[0]
 
-    def configure_domain(self, name, addrs):
+    def configure_domain(self, name, addrs, max_idle_time=None):
         if isinstance(addrs, str):
             addrs = [addrs]
-        domain = Domain(name, addrs)
+
+        if max_idle_time is not None:
+            self.use_config_file = True
+
+        domain = Domain(name, addrs, max_idle_time)
         self.domains.append(domain)
         return domain
 
@@ -189,14 +194,15 @@ class BaseServer:
             if not self.is_name_used(name):
                 return name
 
-    def configure_random_domain(self, num_addrs, addr_fun=random_addr):
+    def configure_random_domain(self, num_addrs, addr_fun=random_addr,
+                                **kwargs):
         name = self.get_random_name()
         addrs = []
         while (len(addrs) < num_addrs):
             addr = addr_fun()
             if not self.is_addr_used(addr):
                 addrs.append(addr)
-        return self.configure_domain(name, addrs)
+        return self.configure_domain(name, addrs, **kwargs)
 
     def set_resources(self, resources):
         self.resources = resources
@@ -240,8 +246,12 @@ class BaseServer:
                         sockets.append(addr)
 
             domain_conf = {sockets_name: sockets}
+
             if random_bool():
                 domain_conf["name"] = "domain-%d" % random.randint(0, 10000)
+
+            if domain.max_idle_time is not None:
+                domain_conf["max_idle_time"] = domain.max_idle_time
 
             domains_conf.append(domain_conf)
         conf["domains"] = domains_conf
@@ -403,10 +413,24 @@ def random_server(server_name, server_conf, min_domains, max_domains,
     return server
 
 
+def random_std_server(server_name, server_conf):
+    return random_server(server_name, server_conf, 1, 4, 1, 4)
+
+
 @pytest.fixture(scope='function')
 def server(request):
-    server = random_server(request.config.option.server,
-                           request_to_conf(request), 1, 4, 1, 4)
+    server = random_std_server(request.config.option.server,
+                               request_to_conf(request))
+    yield server
+    server.stop()
+
+
+@pytest.fixture(scope='function')
+def v3_server(request):
+    server = random_std_server(request.config.option.server,
+                               request_to_conf(request))
+    if not server.supports(ServerFeature.PROTO_V3):
+        pytest.skip("Server does not support protocol version 3")
     yield server
     server.stop()
 
@@ -492,12 +516,29 @@ def limited_subscriptions_server(request):
     server.stop()
 
 
+IMPATIENT_MAX_IDLE_TIME = 2
+
+
+@pytest.fixture(scope='function')
+def impatient_server(request):
+    server = server_by_request(request)
+    if not server.supports(ServerFeature.PROTO_V3):
+        pytest.skip("Server does not support protocol version 3")
+    server.configure_random_domain(1, max_idle_time=IMPATIENT_MAX_IDLE_TIME)
+    server.start()
+    yield server
+    server.stop()
+
+
 def set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
 
-def wait(conn, criteria=lambda: False, timeout=None):
+def wait(conns, criteria=lambda: False, timeout=None):
+    if isinstance(conns, client.Client):
+        conns = [conns]
+
     rfd = None
     wfd = None
     old_wakeup_fd = None
@@ -508,9 +549,12 @@ def wait(conn, criteria=lambda: False, timeout=None):
         old_wakeup_fd = signal.set_wakeup_fd(wfd)
         if timeout is not None:
             deadline = time.time() + timeout
+
         poll = select.poll()
         poll.register(rfd, select.EPOLLIN)
-        poll.register(conn.fileno(), select.EPOLLIN)
+        for conn in conns:
+            poll.register(conn.fileno(), select.EPOLLIN)
+
         while not criteria():
             if timeout is not None:
                 time_left = deadline - time.time()
@@ -519,7 +563,8 @@ def wait(conn, criteria=lambda: False, timeout=None):
             else:
                 time_left = None
             poll.poll(time_left)
-            conn.process()
+            for conn in conns:
+                conn.process()
     finally:
         if rfd is not None:
             os.close(rfd)
@@ -654,7 +699,146 @@ class MultiResponseRecorder(ResponseRecorderBase):
 @pytest.mark.fast
 def test_hello(server):
     conn = client.connect(server.random_domain().random_addr())
-    assert conn.proto_version == proto.VERSION
+    assert conn.proto_version == proto.MAX_VERSION
+
+
+@pytest.mark.fast
+def test_hello_v2_only(server):
+    conn = client.connect(server.random_domain().random_addr(),
+                          proto_version_range=(2, 2))
+    assert conn.proto_version == 2
+
+
+@pytest.mark.fast
+def test_hello_v3_only(v3_server):
+    conn = client.connect(v3_server.random_domain().random_addr(),
+                          proto_version_range=(3, 3))
+    assert conn.proto_version == 3
+
+
+def test_server_tracking_client(impatient_server):
+    conn = client.connect(impatient_server.random_domain().random_addr())
+
+    track_recorder = MultiResponseRecorder()
+    ta_id = conn.track(track_recorder)
+
+    track_recorder.ta_id = ta_id
+
+    wait(conn, criteria=track_recorder.accepted)
+
+    # Verify a track query is being sent
+    start = time.time()
+    timeout = IMPATIENT_MAX_IDLE_TIME
+    query_time = timeout * 0.75
+
+    wait(conn, criteria=lambda: track_recorder.count_notifications() > 0)
+
+    latency = time.time() - start
+    assert latency > query_time
+    assert latency < (query_time + 0.5)
+
+    notifications = track_recorder.get_notifications()
+    assert notifications == [
+        (client.EventType.NOTIFY, client.TRACK_TYPE_QUERY)
+    ]
+
+    conn.track_reply(ta_id)
+    wait(conn, timeout=0.1)
+
+    # Fail to respond to query, expect connection to be closed
+
+    try:
+        wait(conn, timeout=(timeout + 0.5))
+        assert 0
+    except paf.proto.ProtocolError:
+        pass
+
+    notifications = track_recorder.get_notifications()
+    assert notifications == [
+        (client.EventType.NOTIFY, client.TRACK_TYPE_QUERY),
+        (client.EventType.NOTIFY, client.TRACK_TYPE_QUERY)
+    ]
+
+    conn.close()
+
+
+def test_client_activity_avoids_track_queries(impatient_server):
+    conn = client.connect(impatient_server.random_domain().random_addr())
+
+    track_recorder = MultiResponseRecorder()
+    ta_id = conn.track(track_recorder)
+
+    track_recorder.ta_id = ta_id
+
+    wait(conn, criteria=track_recorder.accepted)
+
+    iter = 10
+    timeout = (IMPATIENT_MAX_IDLE_TIME + 1) / iter
+    for _ in range(iter):
+        wait(conn, timeout=timeout)
+        conn.ping()
+
+    assert track_recorder.count_notifications() == 0
+
+    conn.close()
+
+
+def test_ttl_induced_tracking(server):
+    conn = client.connect(server.random_domain().random_addr())
+
+    track_recorder = MultiResponseRecorder()
+    ta_id = conn.track(track_recorder)
+
+    track_recorder.ta_id = ta_id
+
+    wait(conn, criteria=track_recorder.accepted)
+
+    service_id = conn.service_id()
+    generation = 1
+    service_props = {
+        "name": {"service-x"},
+        "value": {0}
+    }
+    service_ttl = 2
+    conn.publish(service_id, generation, service_props, service_ttl)
+
+    start = time.time()
+    wait(conn, criteria=lambda: track_recorder.count_notifications() == 1)
+    latency = time.time() - start
+
+    assert latency < service_ttl
+
+    conn.track_reply(ta_id)
+
+    conn.unpublish(service_id)
+
+    wait(conn, timeout=service_ttl)
+
+    # No new notifications since rate should have been decreased
+    assert track_recorder.count_notifications() == 1
+
+    conn.close()
+
+
+def test_v2_client_not_timed_out(server):
+    conn = client.connect(server.random_domain().random_addr(),
+                          proto_version_range=(2, 2))
+    assert conn.proto_version == 2
+
+    service_id = conn.service_id()
+    generation = 1
+    service_props = {
+        "name": {"service-x"},
+        "value": {0}
+    }
+    service_ttl = 0
+    conn.publish(service_id, generation, service_props, service_ttl)
+
+    wait(conn, timeout=5)
+
+    conn.ping()
+
+    conn.close()
 
 
 @pytest.mark.fast
@@ -669,6 +853,37 @@ def test_invalid_client_id_reuse(server):
     if conn1 is not None:
         conn1.close()
     conn0.ping()
+    conn0.close()
+
+
+@pytest.mark.fast
+def test_client_id_reuse_trigger_liveness_check(v3_server):
+    client_id = client.allocate_client_id()
+    conn0 = client.connect(v3_server.default_domain().random_addr(),
+                           client_id=client_id)
+
+    track_recorder = MultiResponseRecorder()
+    ta_id = conn0.track(track_recorder)
+    track_recorder.ta_id = ta_id
+
+    wait(conn0, criteria=track_recorder.accepted)
+
+    conn1 = None
+    with pytest.raises(client.ProtocolError, match=".*client-id-exists.*"):
+        conn1 = client.connect(v3_server.default_domain().random_addr(),
+                               client_id=client_id)
+    if conn1 is not None:
+        conn1.close()
+
+    def criteria():
+        return track_recorder.count_notifications() == 1
+
+    assert not criteria()
+
+    wait(conn0, criteria=criteria, timeout=1)
+
+    assert criteria()
+
     conn0.close()
 
 
@@ -719,9 +934,9 @@ def run_republish_orphan(domain_addr, new_generation=True,
     ta_id = conn_sub.subscribe(conn_sub.subscription_id(),
                                subscription_recorder)
     subscription_recorder.ta_id = ta_id
-    wait(conn_sub, criteria=subscription_recorder.accepted)
+    wait([conn_sub, conn_pub0], criteria=subscription_recorder.accepted)
 
-    wait(conn_sub, criteria=lambda:
+    wait([conn_sub, conn_pub0], criteria=lambda:
          subscription_recorder.count_notifications() >= 1)
     assert subscription_recorder.count_notifications() == 1
 
@@ -744,7 +959,7 @@ def run_republish_orphan(domain_addr, new_generation=True,
     conn_pub1.publish(service_id, second_generation,
                       second_service_props, service_ttl)
 
-    wait(conn_sub, criteria=lambda:
+    wait([conn_sub, conn_pub1], criteria=lambda:
          subscription_recorder.count_notifications() >= 3)
 
     notifications = subscription_recorder.get_notifications()
@@ -770,7 +985,7 @@ def run_republish_orphan(domain_addr, new_generation=True,
     assert subscription_recorder.get_notifications() == \
         [appeared, orphanized, parented]
 
-    wait(conn_sub, timeout=0.1)
+    wait([conn_sub, conn_pub1], timeout=0.1)
 
     assert subscription_recorder.count_notifications() == 3
 
@@ -1605,7 +1820,7 @@ class ClientProcess(spawn_mp.Process):
         conn = None
         while conn is None:
             try:
-                conn = client.connect(self.domain_addr)
+                conn = client.connect(self.domain_addr, track=True)
             except proto.Error:
                 time.sleep(3*random.random())
 
@@ -1619,6 +1834,7 @@ class ClientProcess(spawn_mp.Process):
         conn.subscribe(sub_id, lambda *args, **optargs: None)
 
         self.ready_queue.put(True)
+
         wait(conn, criteria=lambda: self.stop)
 
         if self.unpublish:
@@ -1695,7 +1911,7 @@ def run_client_reclaims_service(domain, reused_client_id=None):
     assert subscription_recorder.count_notifications() == 2
 
     conn_pub1 = client.connect(domain.default_addr(),
-                               client_id=reused_client_id)
+                               client_id=reused_client_id, track=True)
 
     conn_pub1.publish(service_id, service_generation,
                       service_props, service_ttl)
@@ -1704,9 +1920,7 @@ def run_client_reclaims_service(domain, reused_client_id=None):
          subscription_recorder.count_notifications() >= 3)
 
     # wait for any (errornous!) timeout to happen
-    wait(conn_pub1, timeout=2)
-
-    wait(conn_sub, timeout=0.1)
+    wait([conn_sub, conn_pub1], timeout=2)
 
     notifications = subscription_recorder.get_notifications()
     orphan_since = notifications[1][3]['orphan_since']
@@ -1906,8 +2120,8 @@ def test_misbehaving_clients(server):
         proto.FIELD_TA_ID.name: 1 << 63,
         proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
         proto.FIELD_CLIENT_ID.name: 4711,
-        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
-        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.MAX_VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.MAX_VERSION+2
     }
     run_misbehaving_client(domain_addr,
                            json.dumps(too_large_ta_id).encode('utf-8'),
@@ -1918,8 +2132,8 @@ def test_misbehaving_clients(server):
         proto.FIELD_TA_ID.name: 99,
         proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
         proto.FIELD_CLIENT_ID.name: 1 << 99,
-        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
-        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.MAX_VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.MAX_VERSION+2
     }
     run_misbehaving_client(domain_addr,
                            json.dumps(too_large_client_id).encode('utf-8'),
@@ -1938,8 +2152,8 @@ def test_misbehaving_clients(server):
         proto.FIELD_TA_CMD.name: proto.CMD_HELLO,
         proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
         proto.FIELD_CLIENT_ID.name: 4711,
-        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
-        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.MAX_VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.MAX_VERSION+2
     }
     run_misbehaving_client(domain_addr,
                            json.dumps(missing_ta_id).encode('utf-8'))
@@ -2521,8 +2735,8 @@ def test_unsupported_protocol_version(server):
         proto.FIELD_TA_ID.name: 42,
         proto.FIELD_MSG_TYPE.name: proto.MSG_TYPE_REQUEST,
         proto.FIELD_CLIENT_ID.name: 4711,
-        proto.FIELD_PROTO_MIN_VERSION.name: proto.VERSION+1,
-        proto.FIELD_PROTO_MAX_VERSION.name: proto.VERSION+2
+        proto.FIELD_PROTO_MIN_VERSION.name: proto.MAX_VERSION+1,
+        proto.FIELD_PROTO_MAX_VERSION.name: proto.MAX_VERSION+2
     }
     conn.send(json.dumps(hello).encode('utf-8'))
     expected_response = {
