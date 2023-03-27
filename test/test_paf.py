@@ -2006,7 +2006,7 @@ def test_large_client_disconnect(server):
             "name": {"service-%d" % i},
             "value": {0}
         }
-        service_ttl = int(PING_CLIENT_DURATION/2)
+        service_ttl = int(PING_CLIENT_DURATION/2) + random.randint(-1, 1)
         pub_conn.publish(pub_conn.service_id(), 0, service_props, service_ttl)
 
     subscription_recorder = MultiResponseRecorder()

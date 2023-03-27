@@ -13,6 +13,7 @@ import paf.sd as sd
 import paf.filter
 import paf.props as props
 import paf.eventloop as eventloop
+import paf.timer
 from paf.logging import LogCategory, debug, info, warning
 
 MAJOR_VERSION = 1
@@ -523,15 +524,16 @@ class Connection:
         self.term_cb(self)
 
 
-PURGE_INTERVAL = 1
+CLEAN_INTERVAL = 1
 MAX_HANDSHAKE_TIME = 2
 
 
 class Server:
     def __init__(self, server_addrs, max_user_resources, max_total_resources,
                  event_loop):
-        self.sd = sd.ServiceDiscovery(max_user_resources, max_total_resources,
-                                      self.check_orphans)
+        self.timer_manager = paf.timer.TimerManager(self.timer_changed)
+        self.sd = sd.ServiceDiscovery(self.timer_manager, max_user_resources,
+                                      max_total_resources)
         self.event_loop = event_loop
         self.server_socks = {}
         for server_addr in server_addrs:
@@ -542,12 +544,11 @@ class Server:
             self.server_socks[source] = sock
         for source in self.server_socks.keys():
             self.event_loop.add(source, self.sock_activate)
-        self.orphan_timer = eventloop.Source()
-        self.event_loop.add(self.orphan_timer, self.orphan_timer_activate)
-        self.purge_timer = eventloop.Source()
-        self.event_loop.add(self.purge_timer, self.purge_timer_activate)
+        self.timer_source = eventloop.Source()
+        self.event_loop.add(self.timer_source, self.timer_activate)
         self.clientless_connections = set()
         self.client_connections = set()
+        self.clean_out_timer = None
 
     def num_connections(self):
         return len(self.clientless_connections) + len(self.client_connections)
@@ -564,17 +565,21 @@ class Server:
             return False
         return left == 0
 
-    def schedule_purge(self):
-        if len(self.clientless_connections) > 0:
-            self.purge_timer.set_timeout(time.time() + PURGE_INTERVAL)
+    def schedule_clean_out(self):
+        if len(self.clientless_connections) > 0 and \
+           self.clean_out_timer is None:
+            expiration_time = time.time() + CLEAN_INTERVAL
+            self.clean_out_timer = \
+                self.timer_manager.add(self.clean_out_handler,
+                                       expiration_time)
 
-    def purge_connection(self, conn, handshake_time):
+    def clean_out_connection(self, conn, handshake_time):
         debug("Dropping connection from %s since it failed to "
               "finish the protocol handshake within %.1f s." %
               (conn.conn_addr, MAX_HANDSHAKE_TIME), LogCategory.PROTOCOL)
         conn.terminate()
 
-    def purge_connections(self):
+    def clean_out_connections(self):
         if len(self.clientless_connections) > 0:
             debug("Scanning for idle connections. %d connection(s) has "
                   "not completed the protocol hand shake." %
@@ -588,12 +593,12 @@ class Server:
                     if handshake_time > MAX_HANDSHAKE_TIME:
                         failed.append((conn, handshake_time))
             for conn, handshake_time in failed:
-                self.purge_connection(conn, handshake_time)
+                self.clean_out_connection(conn, handshake_time)
 
-    def purge_timer_activate(self):
-        self.purge_timer.clear_timeout()
-        self.purge_connections()
-        self.schedule_purge()
+    def clean_out_handler(self):
+        self.clean_out_timer = None
+        self.clean_out_connections()
+        self.schedule_clean_out()
 
     def sock_activate(self):
         for source, sock in self.server_socks.items():
@@ -612,7 +617,7 @@ class Server:
                                           self, self.conn_handshake_completed,
                                           self.conn_terminated)
                         self.clientless_connections.add(conn)
-                        self.schedule_purge()
+                        self.schedule_clean_out()
                     except xcm.error as e:
                         self.update_source(source)
                         if e.errno != errno.EAGAIN:
@@ -620,11 +625,16 @@ class Server:
                                   LogCategory.PROTOCOL)
                         break
 
-    def orphan_timer_activate(self):
-        timed_out = self.sd.purge_orphans()
-        for orphan_id in timed_out:
-            debug("Timed out orphan service %x." % orphan_id, LogCategory.CORE)
-        self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
+    def timer_changed(self):
+        timeout = self.timer_manager.next_timeout()
+
+        if timeout is not None:
+            self.timer_source.set_timeout(timeout)
+        else:
+            self.timer_source.clear_timeout()
+
+    def timer_activate(self):
+        self.timer_manager.process()
 
     def update_source(self, source):
         if self.max_clients_reached():
@@ -657,9 +667,6 @@ class Server:
         for stream in self.server_socks.keys():
             self.event_loop.remove(stream)
         self.close_server_socks()
-
-    def check_orphans(self, change_type, service):
-        self.orphan_timer.set_timeout(self.sd.next_orphan_timeout())
 
 
 def create(addrs, max_user_resources, max_total_resources, event_loop):

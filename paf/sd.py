@@ -2,7 +2,6 @@
 # Copyright(c) 2020 Ericsson AB
 
 
-import collections
 import contextlib
 import enum
 import time
@@ -268,41 +267,6 @@ for name in GENERATION_FIELD_NAMES:
 
     setattr(Service, "prev_%s" % name,
             lambda self, name=name: getattr(self.prev, name))
-
-
-class TimeoutQueue:
-    def __init__(self):
-        self.queue = collections.deque()
-
-    def empty(self):
-        return len(self.queue) == 0
-
-    def add(self, new_timeout_id, new_timeout_value):
-        for i in range(len(self.queue) - 1, -1, -1):
-            timeout_id, timeout_value = self.queue[i]
-            if new_timeout_value >= timeout_value:
-                self.queue.insert(i + 1, (new_timeout_id, new_timeout_value))
-                return
-        self.queue.appendleft((new_timeout_id, new_timeout_value))
-
-    def update(self, timeout_id, new_timeout_value):
-        self.remove(timeout_id)
-        self.add(timeout_id, new_timeout_value)
-
-    def remove(self, target_timeout_id):
-        for i, (timeout_id, timeout_value) in enumerate(self.queue):
-            if timeout_id == target_timeout_id:
-                del self.queue[i]
-                return
-
-    def next_timeout(self):
-        if self.empty():
-            return None
-        timeout_id, timeout_value = self.queue[0]
-        return timeout_value
-
-    def __iter__(self):
-        return iter(self.queue)
 
 
 def assure_state(fun, is_connected):
@@ -643,13 +607,14 @@ class Client:
 
 
 class ServiceDiscovery:
-    def __init__(self, max_user_resources, max_total_resources,
+    def __init__(self, timer_manager, max_user_resources, max_total_resources,
                  service_change_cb=None):
+        self.timer_manager = timer_manager
         self.resource_manager = \
             ResourceManager(max_user_resources, max_total_resources)
         self.db = DB()
         self.service_change_cb = service_change_cb
-        self.orphans = TimeoutQueue()
+        self.orphan_timers = {}
 
     def client_connect(self, client_id, user_id):
         client = self.db.get_client(client_id)
@@ -679,22 +644,8 @@ class ServiceDiscovery:
         client = self._get_connected_client(client_id)
 
         service = client.publish(service_id, generation, service_props, ttl,
-                                 self._service_commit)
+                                 self.service_changed)
         return service
-
-    def purge_orphans(self):
-        now = time.time()
-        timed_out = []
-
-        for orphan_id, orphan_timeout in self.orphans:
-            if orphan_timeout > now:
-                break
-            timed_out.append(orphan_id)
-
-        for orphan_id in timed_out:
-            self.purge_orphan(orphan_id)
-
-        return timed_out
 
     def purge_orphan(self, service_id):
         service = self.db.get_service(service_id)
@@ -742,30 +693,55 @@ class ServiceDiscovery:
 
         client.unsubscribe(sub_id)
 
-    def _maintain_orphans(self, change, service):
+    def orphan_timeout(self, service_id):
+        del self.orphan_timers[service_id]
+        self.purge_orphan(service_id)
+
+    def add_orphan_timer(self, service):
+        service_id = service.service_id
+
+        def handler():
+            self.orphan_timeout(service_id)
+
+        timer = self.timer_manager.add(handler, service.orphan_timeout())
+        self.orphan_timers[service_id] = timer
+
+    def remove_orphan_timer(self, service):
+        timer = self.orphan_timers.get(service.service_id)
+        # The orphan being removed may or may not be caused by the
+        # orphan timer firing.
+        if timer is not None:
+            del self.orphan_timers[service.service_id]
+            self.timer_manager.remove(timer)
+
+    def update_orphan_timer(self, service):
+        timeout = service.orphan_timeout()
+        prev_timeout = service.prev_orphan_timeout()
+
+        if timeout != prev_timeout:
+            self.remove_orphan_timer(service)
+            self.add_orphan_timer(service)
+
+    def maintain_orphans(self, change, service):
         if change == ChangeType.ADDED and service.is_orphan():
-            self.orphans.add(service.service_id, service.orphan_timeout())
+            self.add_orphan_timer(service)
         elif change == ChangeType.MODIFIED:
             is_orphan = service.is_orphan()
             was_orphan = service.was_orphan()
             if was_orphan and not is_orphan:
-                self.orphans.remove(service.service_id)
+                self.remove_orphan_timer(service)
             elif not was_orphan and is_orphan:
-                self.orphans.add(service.service_id,
-                                 service.orphan_timeout())
+                self.add_orphan_timer(service)
             elif was_orphan and is_orphan:
-                cur_timeout = service.orphan_timeout()
-                prev_timeout = service.prev_orphan_timeout()
-                if cur_timeout != prev_timeout:
-                    self.orphans.update(service.service_id, cur_timeout)
+                self.update_orphan_timer(service)
         elif change == ChangeType.REMOVED and service.was_orphan():
-            self.orphans.remove(service.service_id)
+            self.remove_orphan_timer(service)
 
-    def _service_commit(self, change, service):
+    def service_changed(self, change, service):
         for subscription in self.db.get_subscriptions():
             subscription.notify(change, service)
 
-        self._maintain_orphans(change, service)
+        self.maintain_orphans(change, service)
 
         if self.service_change_cb is not None:
             self.service_change_cb(change, service)
