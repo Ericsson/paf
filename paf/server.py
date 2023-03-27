@@ -321,7 +321,7 @@ class Connection:
         try:
             if filter is not None:
                 filter = paf.filter.parse(filter)
-            self.sd.create_subscription(sub_id, filter, self.client_id,
+            self.sd.create_subscription(self.client_id, sub_id, filter,
                                         self.subscription_triggered)
             self.sub_tas[sub_id] = ta
             log_msg = "Assigned subscription id %d to new subscription" % \
@@ -334,7 +334,7 @@ class Connection:
             # Subscription creation and activation must be separate,
             # to avoid having the match callback called before the
             # server has gotten the subscription id.
-            self.sd.activate_subscription(sub_id, self.client_id)
+            self.sd.activate_subscription(self.client_id, sub_id)
         except paf.filter.ParseError as e:
             self.warning("Received subscription request with malformed "
                          "filter: %s." % str(e), LogCategory.PROTOCOL)
@@ -353,7 +353,7 @@ class Connection:
 
     def unsubscribe_request(self, ta, sub_id):
         try:
-            self.sd.unsubscribe(sub_id, self.client_id)
+            self.sd.unsubscribe(self.client_id, sub_id)
             sub_ta = self.sub_tas[sub_id]
             del self.sub_tas[sub_id]
             yield sub_ta.complete()
@@ -406,8 +406,8 @@ class Connection:
 
     def publish_request(self, ta, service_id, generation, service_props, ttl):
         try:
-            service = self.sd.publish(service_id, generation, service_props,
-                                      ttl, self.client_id)
+            service = self.sd.publish(self.client_id, service_id, generation,
+                                      service_props, ttl)
             if not service.has_prev_generation():
                 self.debug("Published new service with id %x, generation %d, "
                            "props %s and TTL %d s." %
@@ -455,7 +455,7 @@ class Connection:
 
     def unpublish_request(self, ta, service_id):
         try:
-            self.sd.unpublish(service_id, self.client_id)
+            self.sd.unpublish(self.client_id, service_id)
             self.debug("Unpublished service id %x." % service_id,
                        LogCategory.CORE)
             yield ta.complete()

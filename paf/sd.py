@@ -675,7 +675,7 @@ class ServiceDiscovery:
 
         return client
 
-    def publish(self, service_id, generation, service_props, ttl, client_id):
+    def publish(self, client_id, service_id, generation, service_props, ttl):
         client = self._get_connected_client(client_id)
 
         service = client.publish(service_id, generation, service_props, ttl,
@@ -704,7 +704,7 @@ class ServiceDiscovery:
     def next_orphan_timeout(self):
         return self.orphans.next_timeout()
 
-    def unpublish(self, service_id, client_id):
+    def unpublish(self, client_id, service_id):
         client = self._get_connected_client(client_id)
 
         client.unpublish(service_id)
@@ -721,12 +721,12 @@ class ServiceDiscovery:
     def get_services(self):
         return self.db.get_services()
 
-    def create_subscription(self, sub_id, filter, client_id, match_cb):
+    def create_subscription(self, client_id, sub_id, filter, match_cb):
         client = self._get_connected_client(client_id)
 
         return client.create_subscription(sub_id, filter, match_cb)
 
-    def activate_subscription(self, sub_id, client_id):
+    def activate_subscription(self, client_id, sub_id):
         client = self.db.clients[client_id]
 
         client.activate_subscription(sub_id)
@@ -737,7 +737,7 @@ class ServiceDiscovery:
     def get_subscriptions(self):
         return self.db.get_subscriptions()
 
-    def unsubscribe(self, sub_id, client_id):
+    def unsubscribe(self, client_id, sub_id):
         client = self._get_connected_client(client_id)
 
         client.unsubscribe(sub_id)
