@@ -42,6 +42,18 @@ used.
    Enable logging to console (standard error). Console logging is
    disabled by default.
 
+ * `-o <file>`
+   Enable logging directly to file.
+
+ * `-b <backup-count>`
+   Enable log rotation for direct file logging, and keep <backup-count>
+   number of copies.
+
+ * `-x <log-file-max-size>`
+   Set the maximum log file size (in bytes) before a file is rolled
+   over. Only has effect in case direct file logging with log rotation
+   is enabled. Default is 1000000.
+
  * `-n`
    Disable logging to syslog. Syslog logging is enabled by default.
 

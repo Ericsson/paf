@@ -30,6 +30,13 @@ def usage(name):
           "'+' separator")
     print("                          may not be used in the addresses.")
     print("  -s                      Enable logging to console.")
+    print("  -o <file>               Enable logging directly to file.")
+    print("  -b <num-backups>        Configure log rotation for direct "
+          "file logging.")
+    print("  -x <max-file-size>      Configure the maximum direct log file "
+          "size, before a\n"
+          "                          log file is rolled over. "
+          "Default is %d bytes." % paf.conf.DEFAULT_LOG_FILE_MAX_SIZE)
     print("  -n                      Disable logging to syslog.")
     print("  -y <facility>           Set syslog facility to use.")
     print("  -l <level>              Filter levels below <level>.")
@@ -101,7 +108,7 @@ def main(argv):
     hook = None
 
     try:
-        optlist, args = getopt.getopt(argv[1:], 'f:m:snl:y:c:r:vh')
+        optlist, args = getopt.getopt(argv[1:], 'f:m:sb:x:o:nl:y:c:r:vh')
     except getopt.GetoptError as e:
         early_error("Error parsning command line: %s." % e)
 
@@ -130,6 +137,18 @@ def main(argv):
             domains.append(domain)
         elif opt == '-s':
             conf.log.set_console(True)
+        elif opt == '-o':
+            conf.log.set_log_file(optval)
+        elif opt == '-b':
+            try:
+                conf.log.set_log_file_backup(int(optval))
+            except ValueError:
+                early_error("Backup file count must be an integer.")
+        elif opt == '-x':
+            try:
+                conf.log.set_log_file_max_size(int(optval))
+            except ValueError:
+                early_error("Backup file max size must be an integer.")
         elif opt == '-n':
             conf.log.set_syslog(False)
         elif opt == '-l':
@@ -163,8 +182,10 @@ def main(argv):
 
     try:
         syslog_ident = 'pafd[%d]: ' % os.getpid()
-        paf.logging.configure(conf.log.console, conf.log.syslog, syslog_ident,
-                              conf.log.facility, conf.log.filter)
+        paf.logging.configure(conf.log.console, conf.log.log_file,
+                              conf.log.log_file_backup,
+                              conf.log.log_file_max_size, conf.log.syslog,
+                              syslog_ident, conf.log.facility, conf.log.filter)
     except Exception as e:
         early_error("Error configuring logging: %s." % e)
 

@@ -6,6 +6,9 @@ import logging
 import paf.sd as sd
 
 DEFAULT_LOG_CONSOLE = False
+DEFAULT_LOG_FILE = None
+DEFAULT_LOG_FILE_BACKUP = 0
+DEFAULT_LOG_FILE_MAX_SIZE = 1000000
 DEFAULT_LOG_SYSLOG = True
 DEFAULT_LOG_FACILITY = logging.handlers.SysLogHandler.LOG_DAEMON
 DEFAULT_LOG_FILTER = logging.INFO
@@ -48,12 +51,24 @@ def path(*args):
 class LogConf:
     def __init__(self):
         self.console = DEFAULT_LOG_CONSOLE
+        self.log_file = DEFAULT_LOG_FILE
+        self.log_file_backup = DEFAULT_LOG_FILE_BACKUP
+        self.log_file_max_size = DEFAULT_LOG_FILE_MAX_SIZE
         self.syslog = DEFAULT_LOG_SYSLOG
         self.facility = DEFAULT_LOG_FACILITY
         self.filter = DEFAULT_LOG_FILTER
 
     def set_console(self, console):
         self.console = console
+
+    def set_log_file(self, log_file):
+        self.log_file = log_file
+
+    def set_log_file_backup(self, log_file_backup):
+        self.log_file_backup = log_file_backup
+
+    def set_log_file_max_size(self, log_file_max_size):
+        self.log_file_max_size = log_file_max_size
 
     def set_syslog(self, syslog):
         self.syslog = syslog
@@ -81,9 +96,19 @@ class LogConf:
                 return name
 
     def __str__(self):
-        return "{ console: %s, syslog: %s, filter: %s, facility: %s }" % \
-            (str(self.console).lower(), str(self.syslog).lower(),
-             self.filter_name(), self.facility_name())
+        if self.log_file is None:
+            log_file_s = "-"
+        else:
+            log_file_s = "%s, log_file_backup: %d" % \
+                (self.log_file, self.log_file_backup)
+            if self.log_file_backup > 0:
+                log_file_s += ", log_file_max_size: %d" % \
+                    self.log_file_max_size
+
+        return "{ console: %s, log_file: %s, syslog: %s, filter: %s, " \
+            "facility: %s }" % (str(self.console).lower(), log_file_s,
+                                str(self.syslog).lower(), self.filter_name(),
+                                self.facility_name())
 
 
 class ResourcesClassConf:
@@ -215,6 +240,10 @@ def log_populate(conf, log, path):
     if log is None:
         return
     dict_copy(log, "console", bool, path, conf.log.set_console)
+    dict_copy(log, "log_file", str, path, conf.log.set_log_file)
+    dict_copy(log, "log_file_backup", int, path, conf.log.set_log_file_backup)
+    dict_copy(log, "log_file_max_size", int, path,
+              conf.log.set_log_file_max_size)
     dict_copy(log, "syslog", bool, path, conf.log.set_syslog)
     dict_copy(log, "facility", str, path, conf.log.set_facility)
     dict_copy(log, "filter", str, path, conf.log.set_filter)
