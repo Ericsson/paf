@@ -629,6 +629,9 @@ class ServiceDiscovery:
 
         client.disconnect()
 
+    def has_client(self, client_id):
+        return self.db.has_client(client_id)
+
     def max_total_clients(self):
         return self.resource_manager.max_total_resources[ResourceType.CLIENT]
 
