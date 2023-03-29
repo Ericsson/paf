@@ -2280,6 +2280,34 @@ def test_tcp_dos(tls_server):
         conn.close()
 
 
+def run_handshake_test(tls_addr, finish_tls):
+    if finish_tls:
+        addr = tls_addr
+    else:
+        addr = tls_addr.replace("tls", "tcp", 1)
+
+    conn = xcm.connect(addr, 0)
+
+    start = time.time()
+    msg = conn.receive()
+    latency = time.time() - start
+
+    assert len(msg) == 0  # connection closed
+    assert latency > 2 and latency < 4
+
+
+def test_drop_client_failing_tls_handshake(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+
+    run_handshake_test(domain_addr, False)
+
+
+def test_drop_client_failing_pathfinder_handshake(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+
+    run_handshake_test(domain_addr, True)
+
+
 @pytest.mark.fast
 def test_unsupported_protocol_version(server):
     conn = xcm.connect(server.random_domain().random_addr(), 0)
