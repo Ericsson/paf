@@ -607,13 +607,11 @@ class Client:
 
 
 class ServiceDiscovery:
-    def __init__(self, timer_manager, max_user_resources, max_total_resources,
-                 service_change_cb=None):
+    def __init__(self, timer_manager, max_user_resources, max_total_resources):
         self.timer_manager = timer_manager
         self.resource_manager = \
             ResourceManager(max_user_resources, max_total_resources)
         self.db = DB()
-        self.service_change_cb = service_change_cb
         self.orphan_timers = {}
 
     def client_connect(self, client_id, user_id):
@@ -745,6 +743,3 @@ class ServiceDiscovery:
             subscription.notify(change, service)
 
         self.maintain_orphans(change, service)
-
-        if self.service_change_cb is not None:
-            self.service_change_cb(change, service)
