@@ -10,6 +10,7 @@ import datetime
 import fcntl
 import getopt
 import os
+import signal
 import select
 import shlex
 import sys
@@ -110,6 +111,8 @@ class Worker(Thread):
         self.fun_done = Semaphore(value=0)
 
     def run(self):
+        signal.pthread_sigmask(signal.SIG_BLOCK, signal.valid_signals())
+
         try:
             done = False
             poll = select.poll()
@@ -119,10 +122,14 @@ class Worker(Thread):
                 poll.poll()
                 self.conn.process()
                 self.run_scheduled()
-            os._exit(1)
+            self.exit()
         except Exception as e:
             print(str(e))
-            os._exit(1)
+            self.exit()
+
+    def exit(self):
+        # just calling _exit() leaves the terminal in a messed-up state
+        os.kill(os.getpid(), signal.SIGTERM)
 
     def dispatch_fun(self, fun):
         self.fun = fun
@@ -140,7 +147,7 @@ class Worker(Thread):
             pass
         except Exception as e:
             print(e)
-            os._exit(1)
+            self.exit()
 
     def _cmd_ping(self):
         try:
