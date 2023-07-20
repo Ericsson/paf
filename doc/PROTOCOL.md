@@ -24,7 +24,7 @@ originating client, and server state may thus be recreated, if needed.
 
 ## Document Version
 
-This is version 2.0.0-draft.2 of the Pathfinder protocol
+This is version 2.0.0-draft.3 of the Pathfinder protocol
 specification.
 
 This is an early draft and may well include inconsistencies and other
@@ -303,17 +303,19 @@ Backus-Naur Form (ABNF) [RFC5234]:
     or             = VERTBAR filterlist
     not            = EXCLAMATION filter
     filterlist     = 1*filter
-    item           = simple / present / substring
-    simple         = key op value
+    item           = equal / greaterthan / lessthan / present / substring
+    equal          = key EQUALS value
+    greaterthan    = key RANGLE integer
+    lessthan       = key LANGLE integer
     key            = string
-    value          = string
+    value          = 0*(unescaped / escaped)
     op             = equal / greater / less
     present        = key EQUALS ASTERISK
     substring      = key EQUALS [initial] any [final]
     initial        = string
     any            = ASTERISK *(string ASTERISK)
     final          = string
-    string         = 0*(unescaped / escaped)
+    string         = 1*(unescaped / escaped)
     unescaped      = %x01-20 / %x22-25 / %x27 / %x2B-3B / %x3F-5B /
                      %x5D-7B / %x7E-10FFFF ; all except special and NUL
     escaped        = ESC special
