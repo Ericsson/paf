@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: BSD-3-Clause
-# Copyright(c) 2020-2021 Ericsson AB
+# Copyright(c) 2020-2023 Ericsson AB
 
 #
 # xcm.py - A Python API to Extensible Connection-oriented Messaging (XCM).
@@ -8,8 +8,8 @@
 import os
 import socket
 
-from ctypes import CDLL, c_void_p, c_char_p, c_long, c_int, c_bool, cast, \
-    POINTER, create_string_buffer, byref, get_errno
+from ctypes import CDLL, c_void_p, c_char_p, c_long, c_int, c_double, c_bool, \
+    cast, POINTER, create_string_buffer, byref, get_errno
 
 xcm_c = CDLL("libxcm.so.0", use_errno=True)
 
@@ -49,6 +49,10 @@ xcm_fd_c = xcm_c.xcm_fd
 xcm_fd_c.restype = c_int
 xcm_fd_c.argtypes = [c_void_p]
 
+xcm_want_c = xcm_c.xcm_want
+xcm_want_c.restype = c_int
+xcm_want_c.argtypes = [c_void_p, c_int, c_void_p, c_void_p, c_long]
+
 xcm_set_blocking_c = xcm_c.xcm_set_blocking
 xcm_set_blocking_c.restype = c_int
 xcm_set_blocking_c.argtypes = [c_void_p, c_bool]
@@ -75,6 +79,10 @@ xcm_attr_set_int64_c = xcm_c.xcm_attr_set_int64
 xcm_attr_set_int64_c.restype = c_int
 xcm_attr_set_int64_c.argtypes = [c_void_p, c_char_p, c_long]
 
+xcm_attr_set_double_c = xcm_c.xcm_attr_set_double
+xcm_attr_set_double_c.restype = c_int
+xcm_attr_set_double_c.argtypes = [c_void_p, c_char_p, c_double]
+
 xcm_attr_set_str_c = xcm_c.xcm_attr_set_str
 xcm_attr_set_str_c.restype = c_int
 xcm_attr_set_str_c.argtypes = [c_void_p, c_char_p, c_char_p]
@@ -87,6 +95,10 @@ xcm_attr_map_destroy_c = xcm_c.xcm_attr_map_destroy
 xcm_attr_map_destroy_c.restype = None
 xcm_attr_map_destroy_c.argtypes = [c_void_p]
 
+xcm_attr_map_add_bin_c = xcm_c.xcm_attr_map_add_bin
+xcm_attr_map_add_bin_c.restype = None
+xcm_attr_map_add_bin_c.argtypes = [c_void_p, c_char_p, c_void_p, c_long]
+
 xcm_attr_map_add_bool_c = xcm_c.xcm_attr_map_add_bool
 xcm_attr_map_add_bool_c.restype = None
 xcm_attr_map_add_bool_c.argtypes = [c_void_p, c_char_p, c_bool]
@@ -94,6 +106,10 @@ xcm_attr_map_add_bool_c.argtypes = [c_void_p, c_char_p, c_bool]
 xcm_attr_map_add_int64_c = xcm_c.xcm_attr_map_add_int64
 xcm_attr_map_add_int64_c.restype = None
 xcm_attr_map_add_int64_c.argtypes = [c_void_p, c_char_p, c_long]
+
+xcm_attr_map_add_double_c = xcm_c.xcm_attr_map_add_double
+xcm_attr_map_add_double_c.restype = None
+xcm_attr_map_add_double_c.argtypes = [c_void_p, c_char_p, c_double]
 
 xcm_attr_map_add_str_c = xcm_c.xcm_attr_map_add_str
 xcm_attr_map_add_str_c.restype = None
@@ -124,16 +140,23 @@ def _attr_to_py(attr_type, attr_value, attr_len):
 
 
 def _attr_map_add(attr_map, attr_name, attr_value):
-    if isinstance(attr_value, bool):
-        add_fun = xcm_attr_map_add_bool_c
-    elif isinstance(attr_value, int):
-        add_fun = xcm_attr_map_add_int64_c
-    elif isinstance(attr_value, str):
-        add_fun = xcm_attr_map_add_str_c
-        attr_value = attr_value.encode('utf-8')
+    if isinstance(attr_value, bytes):
+        xcm_attr_map_add_bin_c(attr_map, attr_name.encode('utf-8'), attr_value,
+                               len(attr_value))
     else:
-        raise TypeError("invalid value type: '%s'" % type(attr_value))
-    add_fun(attr_map, attr_name.encode('utf-8'), attr_value)
+        if isinstance(attr_value, bool):
+            add_fun = xcm_attr_map_add_bool_c
+        elif isinstance(attr_value, int):
+            add_fun = xcm_attr_map_add_int64_c
+        elif isinstance(attr_value, float):
+            add_fun = xcm_attr_map_add_double_c
+        elif isinstance(attr_value, str):
+            add_fun = xcm_attr_map_add_str_c
+            attr_value = attr_value.encode('utf-8')
+        else:
+            raise TypeError("invalid value type: '%s'" % type(attr_value))
+
+        add_fun(attr_map, attr_name.encode('utf-8'), attr_value)
 
 
 def _attr_map_create(attrs):
@@ -194,6 +217,8 @@ class Socket:
             set_fun = xcm_attr_set_bool_c
         elif isinstance(attr_value, int):
             set_fun = xcm_attr_set_int64_c
+        elif isinstance(attr_value, float):
+            set_fun = xcm_attr_set_double_c
         elif isinstance(attr_value, str):
             set_fun = xcm_attr_set_str_c
             attr_value = attr_value.encode('utf-8')
@@ -206,7 +231,7 @@ class Socket:
     @_assure_open
     def get_attr(self, attr_name):
         attr_type = c_int()
-        attr_capacity = 1024
+        attr_capacity = 8192
         attr_value = create_string_buffer(attr_capacity)
         rc = xcm_attr_get_c(self.xcm_socket, attr_name.encode('utf-8'),
                             byref(attr_type), attr_value, attr_capacity)
@@ -236,7 +261,7 @@ class ConnectionSocket(Socket):
         rc = xcm_send_c(self.xcm_socket, msg, len(msg))
         if rc < 0:
             _raise_io_err()
-        return 0
+        return rc
 
     def receive(self):
         buf = create_string_buffer(MAX_MSG)
@@ -263,6 +288,7 @@ class ServerSocket(Socket):
 
 
 def connect(addr, flags=0, attrs={}):
+    attr_map = None
     try:
         attr_map = _attr_map_create(attrs)
         if flags == NONBLOCK:
@@ -279,6 +305,7 @@ def connect(addr, flags=0, attrs={}):
 
 
 def server(addr, attrs={}):
+    attr_map = None
     try:
         attr_map = _attr_map_create(attrs)
         xcm_socket = xcm_server_a_c(addr.encode('utf-8'), attr_map)
@@ -287,4 +314,5 @@ def server(addr, attrs={}):
         else:
             _raise_io_err()
     finally:
-        xcm_attr_map_destroy_c(attr_map)
+        if attr_map is not None:
+            xcm_attr_map_destroy_c(attr_map)
