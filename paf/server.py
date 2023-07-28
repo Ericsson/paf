@@ -527,21 +527,23 @@ class Connection:
 CLEAN_INTERVAL = 1
 MAX_HANDSHAKE_TIME = 2
 
+PAF_TO_XCM_SOCKET_ATTRS = {
+    'cert': 'tls.cert_file',
+    'key': 'tls.key_file',
+    'tc': 'tls.tc_file'
+}
+
 
 class Server:
-    def __init__(self, server_addrs, max_user_resources, max_total_resources,
+    def __init__(self, sockets, max_user_resources, max_total_resources,
                  event_loop):
         self.timer_manager = paf.timer.TimerManager(self.timer_changed)
         self.sd = sd.ServiceDiscovery(self.timer_manager, max_user_resources,
                                       max_total_resources)
         self.event_loop = event_loop
         self.server_socks = {}
-        for server_addr in server_addrs:
-            sock = xcm.server(server_addr)
-            sock.set_blocking(False)
-            source = eventloop.XcmSource(sock)
-            source.update(xcm.SO_ACCEPTABLE)
-            self.server_socks[source] = sock
+        for socket in sockets:
+            self.add_socket(socket)
         for source in self.server_socks.keys():
             self.event_loop.add(source, self.sock_activate)
         self.timer_source = eventloop.Source()
@@ -549,6 +551,18 @@ class Server:
         self.clientless_connections = set()
         self.client_connections = set()
         self.clean_out_timer = None
+
+    def add_socket(self, socket_conf):
+        xcm_attrs = {"xcm.blocking": False}
+
+        for attr_name, attr_value in socket_conf.tls_attrs.items():
+            xcm_name = PAF_TO_XCM_SOCKET_ATTRS[attr_name]
+            xcm_attrs[xcm_name] = attr_value
+
+        sock = xcm.server(socket_conf.addr, attrs=xcm_attrs)
+        source = eventloop.XcmSource(sock)
+        source.update(xcm.SO_ACCEPTABLE)
+        self.server_socks[source] = sock
 
     def num_connections(self):
         return len(self.clientless_connections) + len(self.client_connections)
@@ -669,5 +683,5 @@ class Server:
         self.close_server_socks()
 
 
-def create(addrs, max_user_resources, max_total_resources, event_loop):
-    return Server(addrs, max_user_resources, max_total_resources, event_loop)
+def create(sockets, max_user_resources, max_total_resources, event_loop):
+    return Server(sockets, max_user_resources, max_total_resources, event_loop)

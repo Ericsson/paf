@@ -79,7 +79,7 @@ def run(conf, hook=None):
         for domain in conf.domains:
             user = conf.resources.user.resources
             total = conf.resources.total.resources
-            server = paf.server.create(domain.addrs, user, total,
+            server = paf.server.create(domain.sockets, user, total,
                                        event_loop)
             servers.append(server)
 

@@ -45,6 +45,10 @@ random.seed()
 spawn_mp = multiprocessing.get_context('spawn')
 
 
+def random_bool():
+    return random.random() < 0.5
+
+
 def random_name(min_len=1):
     len = random.randint(min_len, max(min_len, 32))
     name = ""
@@ -121,13 +125,18 @@ class Domain:
         os.system("rm -f %s" % self.file)
 
 
+def is_tls_addr(addr):
+    return addr.split(":")[0] == "tls"
+
+
 class Server:
     def __init__(self):
         self.domains = []
         self.process = None
-        self.use_config_file = False
+        self.use_config_file = random_bool()
         self.resources = None
         self.hook = None
+        self.use_tls_attrs = random_bool()
 
         os.environ['PAF_DOMAINS'] = DOMAINS_DIR
         os.system("mkdir -p %s" % DOMAINS_DIR)
@@ -184,10 +193,32 @@ class Server:
             conf["log"] = log_conf
         domains_conf = []
         for domain in self.domains:
-            domains_conf.append({"addrs": domain.addrs})
+            if random_bool():
+                sockets_name = "sockets"
+            else:
+                sockets_name = "addrs"  # old name
+            sockets = []
+            for addr in domain.addrs:
+                if self.use_tls_attrs and is_tls_addr(addr):
+                    tls_attrs = {
+                        "cert": "%s/cert.pem" % SERVER_CERT,
+                        "key": "%s/key.pem" % SERVER_CERT,
+                        "tc": "%s/tc.pem" % SERVER_CERT
+                    }
+                    sockets.append({"addr": addr, "tls": tls_attrs})
+                else:
+                    if random_bool():
+                        sockets.append({"addr": addr})
+                    else:
+                        sockets.append(addr)
+            domains_conf.append({sockets_name: sockets})
         conf["domains"] = domains_conf
+
         if self.resources is not None:
             conf["resources"] = self.resources
+        else:
+            conf["resources"] = {"total": {"clients": MAX_CLIENTS}}
+
         with open(CONFIG_FILE, 'w') as file:
             yaml.dump(conf, file)
 
@@ -226,7 +257,8 @@ class Server:
             return
         cmd = self._cmd()
         pafd_env = os.environ.copy()
-        pafd_env['XCM_TLS_CERT'] = SERVER_CERT
+        if not self.use_tls_attrs:
+            pafd_env['XCM_TLS_CERT'] = SERVER_CERT
         if python_path is not None:
             pafd_env['PYTHONPATH'] = "%s:%s" % \
                 (python_path, pafd_env['PYTHONPATH'])

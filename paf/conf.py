@@ -168,19 +168,36 @@ class ResourcesConf:
         return "{ %s }" % ", ".join(sections)
 
 
-class DomainConf:
-    def __init__(self, addrs):
-        self.addrs = []
-        for addr in addrs:
-            self.add_addr(addr)
-
-    def add_addr(self, addr):
-        if not isinstance(addr, str):
-            raise FormatError("domain address", addr)
-        self.addrs.append(addr)
+class SocketConf:
+    def __init__(self, addr, tls_attrs):
+        self.addr = addr
+        self.tls_attrs = tls_attrs
 
     def __str__(self):
-        return "%s" % self.addrs
+        s = {"addr": self.addr}
+        if len(self.tls_attrs) > 0:
+            s["tls"] = self.tls_attrs
+        return str(s)
+
+    def __repr__(self):
+        return str(self)
+
+
+class DomainConf:
+    def __init__(self, name=None):
+        self.name = name
+        self.sockets = []
+
+    def add_socket(self, addr, tls_attrs={}):
+        self.sockets.append(SocketConf(addr, tls_attrs))
+
+    def __str__(self):
+        s = {}
+        if self.name is not None:
+            s["name"] = self.name
+        s["sockets"] = self.sockets
+
+        return str(s)
 
 
 class Conf:
@@ -189,18 +206,22 @@ class Conf:
         self.domains = []
         self.resources = ResourcesConf()
 
-    def add_domain(self, domain):
-        self.domains.append(DomainConf(domain))
+    def add_domain(self, name=None):
+        domain_conf = DomainConf(name)
+        self.domains.append(domain_conf)
+        return domain_conf
 
     def set_domains(self, domains):
         self.domains = []
         for domain in domains:
-            self.add_domain(domain)
+            domain_conf = self.add_domain()
+            for socket in domain:
+                domain_conf.add_socket(socket)
 
     def __str__(self):
         sections = []
-        sections.append("domains: [ %s ]" %
-                        ", ".join(["%s" % domain for domain in self.domains]))
+        sections.append("domains: [%s]" %
+                        ", ".join([str(domain) for domain in self.domains]))
 
         sections.append("log: %s" % self.log)
 
@@ -249,6 +270,12 @@ def log_populate(conf, log, path):
     dict_copy(log, "filter", str, path, conf.log.set_filter)
 
 
+def assure_tls_addr(field_name, addr):
+    proto = addr.split(":")[0]
+    if proto != "tls" and proto != "utls":
+        raise FormatError(field_name, proto, ["tls", "utls"])
+
+
 def domains_populate(conf, domains, path):
     if domains is None:
         return
@@ -256,9 +283,38 @@ def domains_populate(conf, domains, path):
         domain_path = "%s[%d]" % (path, domain_num)
         assure_type(domain, dict, domain_path)
 
-        addrs = dict_lookup(domain, "addrs", list, domain_path, required=True)
+        name = dict_lookup(domain, "name", str, domain_path, required=False)
 
-        conf.add_domain(addrs)
+        # 'addrs' is an alternative name, supported for backward
+        # compatibility reasons
+        sockets = dict_lookup(domain, "addrs", list, domain_path,
+                              required=False)
+
+        if sockets is None:
+            sockets = dict_lookup(domain, "sockets", list, domain_path,
+                                  required=True)
+
+        domain_conf = conf.add_domain(name)
+
+        for socket_num, socket in enumerate(sockets):
+            socket_path = "%s.sockets[%d]" % (domain_path, socket_num)
+            if isinstance(socket, str):
+                domain_conf.add_socket(socket, {})
+            elif isinstance(socket, dict):
+                if "addr" not in socket:
+                    raise MissingFieldError(socket_path, "addr")
+
+                addr = socket["addr"]
+
+                if "tls" in socket:
+                    assure_tls_addr("%s.addr" % socket_path, addr)
+                    tls_attrs = socket["tls"]
+                else:
+                    tls_attrs = {}
+
+                domain_conf.add_socket(addr, tls_attrs)
+            else:
+                raise FormatError("domain address", socket)
 
 
 def resource_class_copy(resource_class, set_limit):
