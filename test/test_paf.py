@@ -1952,8 +1952,8 @@ ACCEPTABLE_LATENCY = 0.5
 
 
 @pytest.mark.fast
-def test_slow_client(tls_server):
-    domain_addr = tls_server.random_domain().random_addr()
+def test_slow_client(server):
+    domain_addr = server.random_domain().random_addr()
     slow_conn = client.connect(domain_addr)
 
     fast_conn = client.connect(domain_addr)
