@@ -127,12 +127,30 @@ or the global limit (fs.file-max) may need to be increased.
 ## CONFIGURATION FILE FORMAT
 
 The configuration file uses YAML as its base format. The root is a
-YAML dictionary, with three keys, all optional; *domains*,
-*resources*, and *log*.
+YAML dictionary (also known as a YAML mapping, or hash), with three
+keys, all optional; *domains*, *resources*, and *log*.
 
 *domains*, if present, must be a list of service discovery domain
-objects, where each such object is a list of server socket addresses
-to be used by that domain.
+dictionaries. A domain dictionary must either have a key *sockets*,
+which value is a list of all sockets (or endpoints) that should be
+bound to that domain. *addrs* may be used as an alternative name.
+
+A domain may also optionally be given a name, stored as a string under
+the *name* key. This domain name is only used for logging and
+documentation and is not seen in the by clients to the Pathfinder
+server.
+
+Each element of the *sockets* list is a socket. A socket is either the
+address in the form of a string (in XCM format), or a dictionary,
+where the address must be the value of the key *addr*.
+
+For TLS addresses, an addition key *tls* may be present in the socket
+dictionary. *tls*, if present, must be a dictionary with zero or more
+of four possible entries. *cert*, *key*, *tc* may be used to override
+the default XCM certificate, private key, or trusted CA bundle file
+locations. The key *crl* may be included in case certificate
+revocation list checking is to be employed. The value of each such key
+must be a filename in string format.
 
 *resources*, if present, must be a dictionary, containing either or
 both of two keys *total* and *user*.
