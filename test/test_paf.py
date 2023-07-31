@@ -33,10 +33,13 @@ MAX_CLIENTS = 250
 
 SERVER_DEBUG = False
 
-SERVER_CERT = 'cert/cert-server'
+BASE_DIR = os.getcwd()
+
+SERVER_CERT = "%s/cert/server" % BASE_DIR
 
 NUM_CLIENT_CERTS = 3
-CLIENT_CERTS = ["cert/cert-client%d" % n for n in range(NUM_CLIENT_CERTS)]
+CLIENT_CERTS = ["%s/cert/client%d" % (BASE_DIR, n)
+                for n in range(NUM_CLIENT_CERTS)]
 
 os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
 
@@ -134,9 +137,9 @@ class Server:
         self.domains = []
         self.process = None
         self.use_config_file = random_bool()
+        self.crl = None
         self.resources = None
         self.hook = None
-        self.use_tls_attrs = random_bool()
 
         os.environ['PAF_DOMAINS'] = DOMAINS_DIR
         os.system("mkdir -p %s" % DOMAINS_DIR)
@@ -185,7 +188,11 @@ class Server:
         self.resources = resources
         self.use_config_file = True
 
-    def _write_config_file(self):
+    def revoke_client0(self):
+        self.crl = "%s/empty-crl.pem" % SERVER_CERT
+        self.use_config_file = True
+
+    def _write_config_file(self, use_tls_attrs):
         conf = {}
         if SERVER_DEBUG:
             log_conf = {}
@@ -199,12 +206,18 @@ class Server:
                 sockets_name = "addrs"  # old name
             sockets = []
             for addr in domain.addrs:
-                if self.use_tls_attrs and is_tls_addr(addr):
+                if use_tls_attrs and is_tls_addr(addr):
                     tls_attrs = {
                         "cert": "%s/cert.pem" % SERVER_CERT,
                         "key": "%s/key.pem" % SERVER_CERT,
                         "tc": "%s/tc.pem" % SERVER_CERT
                     }
+
+                    if self.crl is not None:
+                        tls_attrs["crl"] = self.crl
+                    elif random_bool():
+                        tls_attrs["crl"] = "%s/empty-crl.pem" % SERVER_CERT
+
                     sockets.append({"addr": addr, "tls": tls_attrs})
                 else:
                     if random_bool():
@@ -219,15 +232,14 @@ class Server:
         else:
             conf["resources"] = {"total": {"clients": MAX_CLIENTS}}
 
-        with open(CONFIG_FILE, 'w') as file:
-            yaml.dump(conf, file)
+        with open(CONFIG_FILE, 'w') as f:
+            yaml.dump(conf, f)
 
     def _cmd(self):
         cmd = ["pafd"]
         if self.hook is not None:
             cmd.extend(["-r", self.hook])
         if self.use_config_file:
-            self._write_config_file()
             cmd.extend(["-f", CONFIG_FILE])
         else:
             cmd.extend(["-c", str(MAX_CLIENTS)])
@@ -255,10 +267,23 @@ class Server:
     def start(self, python_path=None):
         if self.process is not None:
             return
+
+        if self.use_config_file:
+            if self.crl is not None:
+                use_tls_attrs = True
+            else:
+                use_tls_attrs = random_bool()
+            self._write_config_file(use_tls_attrs)
+        else:
+            use_tls_attrs = False
+
         cmd = self._cmd()
         pafd_env = os.environ.copy()
-        if not self.use_tls_attrs:
+        if use_tls_attrs:
+            pafd_env.pop('XCM_TLS_CERT')
+        else:
             pafd_env['XCM_TLS_CERT'] = SERVER_CERT
+
         if python_path is not None:
             pafd_env['PYTHONPATH'] = "%s:%s" % \
                 (python_path, pafd_env['PYTHONPATH'])

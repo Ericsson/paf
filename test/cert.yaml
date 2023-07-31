@@ -1,0 +1,81 @@
+base-path: test/cert
+
+certs:
+  client-root:
+    subject_name: client-root
+    ca: True
+  client0:
+    subject_name: client0
+    issuer: client-root
+
+  client1:
+    subject_name: client1
+    issuer: client-root
+
+  client2:
+    subject_name: client2
+    issuer: client-root
+
+  server-root:
+    subject_name: server-root
+    ca: True
+
+  server:
+    subject_name: server
+    issuer: server-root
+
+crls:
+  empty-crl:
+    issuer: client-root
+    revokes: []
+  revoked-client0-crl:
+    issuer: client-root
+    revokes: [client0]
+
+files:
+  - type: cert
+    id: client0
+    path: client0/cert.pem
+  - type: key
+    id: client0
+    path: client0/key.pem
+
+  - type: cert
+    id: client1
+    path: client1/cert.pem
+  - type: key
+    id: client1
+    path: client1/key.pem
+
+  - type: cert
+    id: client2
+    path: client2/cert.pem
+  - type: key
+    id: client2
+    path: client2/key.pem
+
+  - type: bundle
+    certs:
+      - server-root
+    paths:
+      - client0/tc.pem
+      - client1/tc.pem
+      - client2/tc.pem
+
+  - type: cert
+    id: server
+    path: server/cert.pem
+  - type: key
+    id: server
+    path: server/key.pem
+  - type: bundle
+    certs:
+      - client-root
+    path: server/tc.pem
+
+  - type: crl
+    id: empty-crl
+    path: server/empty-crl.pem
+  - type: crl
+    id: revoked-client0-crl
+    path: server/revoked-client0-crl.pem

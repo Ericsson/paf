@@ -530,7 +530,8 @@ MAX_HANDSHAKE_TIME = 2
 PAF_TO_XCM_SOCKET_ATTRS = {
     'cert': 'tls.cert_file',
     'key': 'tls.key_file',
-    'tc': 'tls.tc_file'
+    'tc': 'tls.tc_file',
+    'crl': 'tls.crl_file'
 }
 
 
@@ -558,6 +559,9 @@ class Server:
         for attr_name, attr_value in socket_conf.tls_attrs.items():
             xcm_name = PAF_TO_XCM_SOCKET_ATTRS[attr_name]
             xcm_attrs[xcm_name] = attr_value
+
+            if attr_name == "crl":
+                xcm_attrs["tls.check_crl"] = True
 
         sock = xcm.server(socket_conf.addr, attrs=xcm_attrs)
         source = eventloop.XcmSource(sock)
