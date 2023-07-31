@@ -607,7 +607,9 @@ class Client:
 
 
 class ServiceDiscovery:
-    def __init__(self, timer_manager, max_user_resources, max_total_resources):
+    def __init__(self, name, timer_manager, max_user_resources,
+                 max_total_resources):
+        self.name = name
         self.timer_manager = timer_manager
         self.resource_manager = \
             ResourceManager(max_user_resources, max_total_resources)

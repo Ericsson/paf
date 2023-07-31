@@ -224,7 +224,12 @@ class Server:
                         sockets.append({"addr": addr})
                     else:
                         sockets.append(addr)
-            domains_conf.append({sockets_name: sockets})
+
+            domain_conf = {sockets_name: sockets}
+            if random_bool():
+                domain_conf["name"] = "domain-%d" % random.randint(0, 10000)
+
+            domains_conf.append(domain_conf)
         conf["domains"] = domains_conf
 
         if self.resources is not None:

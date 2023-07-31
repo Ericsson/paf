@@ -145,15 +145,21 @@ class Connection:
         self.sub_tas = {}
         self.connect_time = time.time()
         self.handshaked = False
-        info("Accepted new client connection from \"%s\"." %
-             self.conn_addr, LogCategory.PROTOCOL)
+        self.info("Accepted new client connection from \"%s\"." %
+                  self.conn_addr, LogCategory.PROTOCOL)
 
     def log(self, log_fun, msg, category):
+        if self.sd.name is not None:
+            prefix = "%s: " % self.sd.name
+        else:
+            prefix = ""
+
         if self.client_id is not None:
             client = "0x%x" % self.client_id
         else:
             client = "unknown"
-        log_fun("<%s> %s" % (client, msg), category)
+
+        log_fun("%s<%s> %s" % (prefix, client, msg), category)
 
     def debug(self, msg, category):
         self.log(debug, msg, category)
@@ -536,11 +542,11 @@ PAF_TO_XCM_SOCKET_ATTRS = {
 
 
 class Server:
-    def __init__(self, sockets, max_user_resources, max_total_resources,
+    def __init__(self, name, sockets, max_user_resources, max_total_resources,
                  event_loop):
         self.timer_manager = paf.timer.TimerManager(self.timer_changed)
-        self.sd = sd.ServiceDiscovery(self.timer_manager, max_user_resources,
-                                      max_total_resources)
+        self.sd = sd.ServiceDiscovery(name, self.timer_manager,
+                                      max_user_resources, max_total_resources)
         self.event_loop = event_loop
         self.server_socks = {}
         for socket in sockets:
@@ -568,6 +574,13 @@ class Server:
         source.update(xcm.SO_ACCEPTABLE)
         self.server_socks[source] = sock
 
+    def debug(self, msg, category):
+        if self.sd.name is not None:
+            prefix = "%s: "
+        else:
+            prefix = ""
+        debug("%s%s" % (prefix, msg), category)
+
     def num_connections(self):
         return len(self.clientless_connections) + len(self.client_connections)
 
@@ -592,16 +605,16 @@ class Server:
                                        expiration_time)
 
     def clean_out_connection(self, conn, handshake_time):
-        debug("Dropping connection from %s since it failed to "
-              "finish the protocol handshake within %.1f s." %
-              (conn.conn_addr, MAX_HANDSHAKE_TIME), LogCategory.PROTOCOL)
+        self.debug("Dropping connection from %s since it failed to "
+                   "finish the protocol handshake within %.1f s." %
+                   (conn.conn_addr, MAX_HANDSHAKE_TIME), LogCategory.PROTOCOL)
         conn.terminate()
 
     def clean_out_connections(self):
         if len(self.clientless_connections) > 0:
-            debug("Scanning for idle connections. %d connection(s) has "
-                  "not completed the protocol hand shake." %
-                  len(self.clientless_connections), LogCategory.PROTOCOL)
+            self.debug("Scanning for idle connections. %d connection(s) has "
+                       "not completed the protocol hand shake." %
+                       len(self.clientless_connections), LogCategory.PROTOCOL)
             now = time.time()
             failed = []
             for conn in self.clientless_connections:
@@ -639,8 +652,8 @@ class Server:
                     except xcm.error as e:
                         self.update_source(source)
                         if e.errno != errno.EAGAIN:
-                            debug("Error accepting client: %s" % e,
-                                  LogCategory.PROTOCOL)
+                            self.debug("Error accepting client: %s" % e,
+                                       LogCategory.PROTOCOL)
                         break
 
     def timer_changed(self):
@@ -687,5 +700,6 @@ class Server:
         self.close_server_socks()
 
 
-def create(sockets, max_user_resources, max_total_resources, event_loop):
-    return Server(sockets, max_user_resources, max_total_resources, event_loop)
+def create(name, sockets, max_user_resources, max_total_resources, event_loop):
+    return Server(name, sockets, max_user_resources, max_total_resources,
+                  event_loop)
