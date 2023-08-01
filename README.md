@@ -96,7 +96,7 @@ version is 0.15 (found in XCM v1.1.0).
 
 In case `pafc` or `paf.client` are used in combination with per-server
 TLS certificate file configuration or if TLS credentials are
-configured in the 'pafd' configuration file, XCM API/ABI 0.16 (XCM
+configured in the `pafd` configuration file, XCM API/ABI 0.16 (XCM
 v1.2.0) or later is required.
 
 For certificate recovation list (CRL) functionality to be available,
