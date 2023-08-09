@@ -870,7 +870,6 @@ def test_republish_same_and_older_generation(server):
 
 @pytest.mark.fast
 def test_republish_same_generation_with_different_props(server):
-    return
     generation = 11111111111
     first_props = {"name": {"foo"}}
     second_props = {"name": {"bar"}}
@@ -884,7 +883,6 @@ def test_republish_same_generation_with_different_props(server):
 
 @pytest.mark.fast
 def test_republish_same_generation_with_different_ttl(server):
-    return
     generation = 11111111111
     props = {"name": {"foo"}}
     first_ttl = 42
@@ -897,16 +895,28 @@ def test_republish_same_generation_with_different_ttl(server):
 
 
 @pytest.mark.fast
+def test_unpublish_republished_from_different_client_same_user(server):
+    domain_addr = server.random_domain().random_addr()
+    conn0 = client.connect(domain_addr)
+
+    service_id = conn0.service_id()
+    conn0.publish(service_id, 0, {"name": {"service-x"}}, 42)
+
+    conn1 = client.connect(domain_addr)
+
+    conn1.unpublish(service_id)
+
+    delayed_close(conn0)
+    delayed_close(conn1)
+
+
+@pytest.mark.fast
 def test_unpublish_from_different_client_same_user(server):
     domain_addr = server.random_domain().random_addr()
     conn0 = client.connect(domain_addr)
 
-    publish_recorder = SingleResponseRecorder()
     service_id = conn0.service_id()
-    ta_id = conn0.publish(service_id, 0, {"name": {"service-x"}},
-                          42, publish_recorder)
-    publish_recorder.ta_id = ta_id
-    wait(conn0, criteria=publish_recorder.completed)
+    conn0.publish(service_id, 0, {"name": {"service-x"}}, 42)
 
     conn1 = client.connect(domain_addr)
 
