@@ -894,20 +894,38 @@ def test_republish_same_generation_with_different_ttl(server):
                          proto.FAIL_REASON_SAME_GENERATION_BUT_DIFFERENT)
 
 
-@pytest.mark.fast
-def test_unpublish_republished_from_different_client_same_user(server):
-    domain_addr = server.random_domain().random_addr()
+def run_unpublish_republished_non_orphan(domain_addr, new_generation=True):
     conn0 = client.connect(domain_addr)
 
+    generation = 0
     service_id = conn0.service_id()
-    conn0.publish(service_id, 0, {"name": {"service-x"}}, 42)
+    service_props = {"name": {"service-x"}}
+    service_ttl = 42
+
+    conn0.publish(service_id, generation, service_props, service_ttl)
 
     conn1 = client.connect(domain_addr)
+
+    if new_generation:
+        generation += 1
+    conn1.publish(service_id, generation, service_props, service_ttl)
 
     conn1.unpublish(service_id)
 
     delayed_close(conn0)
     delayed_close(conn1)
+
+
+@pytest.mark.fast
+def test_unpublish_republished_non_orphan_same_generation(server):
+    domain_addr = server.random_domain().random_addr()
+    run_unpublish_republished_non_orphan(domain_addr, new_generation=False)
+
+
+@pytest.mark.fast
+def test_unpublish_republished_non_orphan_different_generation(server):
+    domain_addr = server.random_domain().random_addr()
+    run_unpublish_republished_non_orphan(domain_addr, new_generation=True)
 
 
 @pytest.mark.fast

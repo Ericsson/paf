@@ -476,6 +476,9 @@ class Client:
                         change.orphan_since = None
 
             elif generation > service.generation():
+                if self.client_id != service.client_id():
+                    self.capture_service(service)
+
                 with service.modify() as change:
                     change.generation = generation
                     change.props = service_props
