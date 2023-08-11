@@ -5,33 +5,34 @@
 # Integration test suite for Pathfinder Server
 #
 
-import pytest
-import os
-import fcntl
-import sys
-import time
-import subprocess
-import select
-from enum import Enum
-import json
-import random
-import string
-import signal
-import threading
 import collections
-import multiprocessing
-import yaml
-import queue
 import cpu_speed
+import fcntl
+import json
+import multiprocessing
+import os
+import pytest
+import queue
+import random
+import select
+import shutil
+import signal
+import string
+import subprocess
+import sys
+import threading
+import time
+import yaml
+
+from enum import Enum, auto
 
 import paf.client as client
 import paf.proto as proto
 import paf.xcm as xcm
 import paf.server
 
-MAX_CLIENTS = 250
-
-SERVER_DEBUG = False
+SERVER_DEBUG = True
+USE_VALGRIND = False
 
 BASE_DIR = os.getcwd()
 
@@ -132,17 +133,33 @@ def is_tls_addr(addr):
     return addr.split(":")[0] == "tls"
 
 
-class Server:
+class ServerFeature(Enum):
+    CONFIG_FILE = auto()
+    RESOURCE_LIMITS = auto()
+    MULTI_SOCKET_DOMAIN = auto()
+    HOOK = auto()
+    ACCESS_CONTROL = auto()
+
+
+class BaseServer:
     def __init__(self):
         self.domains = []
         self.process = None
-        self.use_config_file = random_bool()
         self.crl = None
         self.resources = None
         self.hook = None
 
         os.environ['PAF_DOMAINS'] = DOMAINS_DIR
         os.system("mkdir -p %s" % DOMAINS_DIR)
+
+    def is_available(self):
+        return shutil.which(self.program_name) is not None
+
+    def max_or_many_clients(self):
+        if self.supports(ServerFeature.RESOURCE_LIMITS):
+            return self.max_clients
+        else:
+            return 200
 
     def random_domain(self):
         return random.choice(self.domains)
@@ -235,24 +252,29 @@ class Server:
         if self.resources is not None:
             conf["resources"] = self.resources
         else:
-            conf["resources"] = {"total": {"clients": MAX_CLIENTS}}
+            conf["resources"] = {"total": {"clients": self.max_clients}}
 
         with open(CONFIG_FILE, 'w') as f:
             yaml.dump(conf, f)
 
-    def _cmd(self):
-        cmd = ["pafd"]
+    def cmdline(self):
+        line = self.cmd()
         if self.hook is not None:
-            cmd.extend(["-r", self.hook])
+            line.extend(["-r", self.hook])
         if self.use_config_file:
-            cmd.extend(["-f", CONFIG_FILE])
+            line.extend(["-f", CONFIG_FILE])
         else:
-            cmd.extend(["-c", str(MAX_CLIENTS)])
+            if self.supports(ServerFeature.RESOURCE_LIMITS):
+                line.extend(["-c", str(self.max_clients)])
             if SERVER_DEBUG:
-                cmd.extend(["-l", "debug"])
+                line.extend(["-l", "debug"])
             for domain in self.domains:
-                cmd.extend(["-m", "%s" % "+".join(domain.addrs)])
-        return cmd
+                if self.supports(ServerFeature.MULTI_SOCKET_DOMAIN):
+                    line.extend(["-m", "%s" % "+".join(domain.addrs)])
+                else:
+                    assert len(domain.addrs) == 1
+                    line.extend([domain.addrs[0]])
+        return line
 
     def _assure_up(self):
         # assumes the last address in the last domain is bound last
@@ -282,7 +304,7 @@ class Server:
         else:
             use_tls_attrs = False
 
-        cmd = self._cmd()
+        cmdline = self.cmdline()
         pafd_env = os.environ.copy()
         if use_tls_attrs:
             pafd_env.pop('XCM_TLS_CERT')
@@ -292,7 +314,7 @@ class Server:
         if python_path is not None:
             pafd_env['PYTHONPATH'] = "%s:%s" % \
                 (python_path, pafd_env['PYTHONPATH'])
-        self.process = subprocess.Popen(cmd, env=pafd_env)
+        self.process = subprocess.Popen(cmdline, env=pafd_env)
         self._assure_up()
 
     def stop(self, signo=signal.SIGTERM):
@@ -305,41 +327,91 @@ class Server:
         self.process = None
 
 
-def random_server(min_domains, max_domains, min_addrs_per_domain,
+class PafServer(BaseServer):
+    def __init__(self):
+        BaseServer.__init__(self)
+        self.program_name = "pafd"
+        self.max_clients = 250
+        self.use_config_file = random_bool()
+
+    def cmd(self):
+        return [self.program_name]
+
+    def supports(self, feature):
+        # you enumuerate it, we got it
+        return True
+
+
+class TpafServer(BaseServer):
+    def __init__(self):
+        BaseServer.__init__(self)
+        self.program_name = "tpafd"
+        self.use_config_file = False
+
+    def cmd(self):
+        if USE_VALGRIND:
+            return [
+                "valgrind", "--tool=memcheck", "--leak-check=full",
+                "--error-exitcode=1", "-q", self.program_name
+            ]
+        else:
+            return ["tpafd"]
+
+    def supports(self, feature):
+        return False
+
+
+SERVER_NAME_TO_CLASS = {"paf": PafServer, "tpaf": TpafServer}
+
+
+def server_by_name(name):
+    server_class = SERVER_NAME_TO_CLASS[name]
+    return server_class()
+
+
+def random_server(server_name, min_domains, max_domains, min_addrs_per_domain,
                   max_addrs_per_domain):
-    server = Server()
+    server = server_by_name(server_name)
+
     num_domains = random.randint(min_domains, max_domains)
+
     for i in range(num_domains):
-        num_addrs = random.randint(min_addrs_per_domain, max_addrs_per_domain)
+        if server.supports(ServerFeature.MULTI_SOCKET_DOMAIN):
+            num_addrs = random.randint(min_addrs_per_domain,
+                                       max_addrs_per_domain)
+        else:
+            num_addrs = 1
+
         server.configure_random_domain(num_addrs)
+
     server.start()
     return server
 
 
 @pytest.fixture(scope='function')
-def server():
-    server = random_server(1, 4, 1, 4)
+def server(request):
+    server = random_server(request.config.option.server, 1, 4, 1, 4)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
-def md_server():
-    server = random_server(8, 16, 1, 4)
+def md_server(request):
+    server = random_server(request.config.option.server, 8, 16, 1, 4)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
-def ms_server():
-    server = random_server(1, 4, 16, 32)
+def ms_server(request):
+    server = random_server(request.config.option.server, 1, 4, 16, 32)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
-def tls_server():
-    server = Server()
+def tls_server(request):
+    server = server_by_name(request.config.option.server)
     server.configure_random_domain(1, addr_fun=random_tls_addr)
     server.start()
     yield server
@@ -354,18 +426,24 @@ MAX_USER_SUBSCRIPTIONS = 99
 MAX_TOTAL_SUBSCRIPTIONS = 100
 
 
-def limited_server(resources):
-    server = Server()
+def limited_server(server_name, resources):
+    server = server_by_name(server_name)
+
+    if not server.supports(ServerFeature.RESOURCE_LIMITS):
+        pytest.skip()
+
     server.configure_random_domain(1, addr_fun=random_tls_addr)
     server.configure_random_domain(1, addr_fun=random_ux_addr)
     server.set_resources(resources)
+
     server.start()
+
     return server
 
 
 @pytest.fixture(scope='function')
-def limited_clients_server():
-    server = limited_server({
+def limited_clients_server(request):
+    server = limited_server(request.config.option.server, {
         "user": {"clients": MAX_USER_CLIENTS},
         "total": {"clients": MAX_TOTAL_CLIENTS}
     })
@@ -374,8 +452,8 @@ def limited_clients_server():
 
 
 @pytest.fixture(scope='function')
-def limited_services_server():
-    server = limited_server({
+def limited_services_server(request):
+    server = limited_server(request.config.option.server, {
         "user": {"services": MAX_USER_SERVICES},
         "total": {"services": MAX_TOTAL_SERVICES}
     })
@@ -384,8 +462,8 @@ def limited_services_server():
 
 
 @pytest.fixture(scope='function')
-def limited_subscriptions_server():
-    server = limited_server({
+def limited_subscriptions_server(request):
+    server = limited_server(request.config.option.server, {
         "user": {"subscriptions": MAX_USER_SUBSCRIPTIONS},
         "total": {"subscriptions": MAX_TOTAL_SUBSCRIPTIONS}
     })
@@ -709,6 +787,9 @@ def test_republish_same_generation_orphan_from_different_client_id(server):
 
 @pytest.mark.fast
 def test_orphan_causes_rejection_of_client_with_new_user_id(tls_server):
+    if not tls_server.supports(ServerFeature.ACCESS_CONTROL):
+        pytest.skip()
+
     domain_addr = tls_server.default_domain().default_addr()
     client_id = client.allocate_client_id()
 
@@ -946,6 +1027,9 @@ def test_unpublish_from_different_client_same_user(server):
 
 @pytest.mark.fast
 def test_unpublish_from_different_user(tls_server):
+    if not tls_server.supports(ServerFeature.ACCESS_CONTROL):
+        pytest.skip()
+
     domain_addr = tls_server.default_domain().default_addr()
 
     os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
@@ -1532,7 +1616,9 @@ class ClientProcess(spawn_mp.Process):
 def test_survives_killed_clients(server):
     domain_addr = server.random_domain().random_addr()
 
-    num_clients = cpu_speed.adjust_cardinality_down(MAX_CLIENTS - 1)
+    num_clients = server.max_or_many_clients()
+
+    num_clients = cpu_speed.adjust_cardinality_down(num_clients)
 
     ready_queue = spawn_mp.Queue()
     processes = []
@@ -1759,8 +1845,10 @@ def run_misbehaving_client(addr, junk_msg, skip_hello=True):
         junk_msg
     ]
     conn = xcm.connect(addr, 0)
+
     for msg in msgs:
         conn.send(msg)
+
     while True:
         msg = conn.receive()
         if len(msg) == 0:
@@ -1873,7 +1961,10 @@ def test_misbehaving_clients(server):
 def test_many_clients(server):
     domain = server.random_domain()
     conns = []
-    while len(conns) < MAX_CLIENTS:
+
+    num_clients = server.max_or_many_clients()
+
+    while len(conns) < num_clients:
         try:
             conn = client.connect(domain.default_addr())
             conns.append(conn)
@@ -1888,16 +1979,17 @@ def test_many_clients(server):
     for i, conn in enumerate(conns):
         wait(conn, criteria=lambda: len(replies) == i+1)
 
-    last_conn = None
-    try:
-        # the server shouldn't be accepting any more connections
-        def fail():
-            assert False
-        last_conn = client.connect(domain.default_addr(), ready_cb=fail)
-        wait(last_conn, timeout=0.5)
-        last_conn.close()
-    except client.Error:
-        pass
+    if server.supports(ServerFeature.RESOURCE_LIMITS):
+        last_conn = None
+        try:
+            # the server shouldn't be accepting any more connections
+            def fail():
+                assert False
+            last_conn = client.connect(domain.default_addr(), ready_cb=fail)
+            wait(last_conn, timeout=0.5)
+            last_conn.close()
+        except client.Error:
+            pass
 
     for conn in conns:
         conn.close()
@@ -2354,7 +2446,7 @@ def test_tcp_dos(tls_server):
     domain_addr = tls_server.default_domain().default_addr()
 
     conns = []
-    while len(conns) < MAX_CLIENTS:
+    while len(conns) < tls_server.max_or_many_clients():
         try:
             conn = xcm.connect(domain_addr, 0)
             conns.append(conn)
@@ -2524,7 +2616,7 @@ def test_daemon_hook():
 def run(servers):
     open("hook.tmp", "w+").write("%d" % len(servers))
 """)
-    server = Server()
+    server = PafServer()
     server.configure_random_domain(1)
     server.hook = "hook.run"
     server.start(python_path=os.getcwd())
@@ -2538,7 +2630,7 @@ def run(servers):
 
 
 @pytest.mark.fast
-def test_handle_signals():
+def test_handle_signals(request):
     if not xcm_has_uxf():
         return
     try:
@@ -2548,7 +2640,7 @@ def test_handle_signals():
 
         assert not os.path.exists(domain_uxf_file)
 
-        server = Server()
+        server = server_by_name(request.config.option.server)
 
         server.configure_domain(domain_name, domain_addr)
 
