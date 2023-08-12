@@ -31,7 +31,6 @@ import paf.proto as proto
 import paf.xcm as xcm
 import paf.server
 
-SERVER_DEBUG = True
 USE_VALGRIND = False
 
 BASE_DIR = os.getcwd()
@@ -142,7 +141,9 @@ class ServerFeature(Enum):
 
 
 class BaseServer:
-    def __init__(self):
+    def __init__(self, program_name, debug):
+        self.program_name = program_name
+        self.debug = debug
         self.domains = []
         self.process = None
         self.crl = None
@@ -211,7 +212,7 @@ class BaseServer:
 
     def _write_config_file(self, use_tls_attrs):
         conf = {}
-        if SERVER_DEBUG:
+        if self.debug:
             log_conf = {}
             log_conf["filter"] = "debug"
             conf["log"] = log_conf
@@ -266,7 +267,7 @@ class BaseServer:
         else:
             if self.supports(ServerFeature.RESOURCE_LIMITS):
                 line.extend(["-c", str(self.max_clients)])
-            if SERVER_DEBUG:
+            if self.debug:
                 line.extend(["-l", "debug"])
             for domain in self.domains:
                 if self.supports(ServerFeature.MULTI_SOCKET_DOMAIN):
@@ -328,9 +329,8 @@ class BaseServer:
 
 
 class PafServer(BaseServer):
-    def __init__(self):
-        BaseServer.__init__(self)
-        self.program_name = "pafd"
+    def __init__(self, debug):
+        BaseServer.__init__(self, "pafd", debug)
         self.max_clients = 250
         self.use_config_file = random_bool()
 
@@ -343,9 +343,8 @@ class PafServer(BaseServer):
 
 
 class TpafServer(BaseServer):
-    def __init__(self):
-        BaseServer.__init__(self)
-        self.program_name = "tpafd"
+    def __init__(self, debug):
+        BaseServer.__init__(self, "tpafd", debug)
         self.use_config_file = False
 
     def cmd(self):
@@ -364,14 +363,26 @@ class TpafServer(BaseServer):
 SERVER_NAME_TO_CLASS = {"paf": PafServer, "tpaf": TpafServer}
 
 
-def server_by_name(name):
-    server_class = SERVER_NAME_TO_CLASS[name]
-    return server_class()
+def server_by_name(server_name, server_conf):
+    server_class = SERVER_NAME_TO_CLASS[server_name]
+    return server_class(**server_conf)
 
 
-def random_server(server_name, min_domains, max_domains, min_addrs_per_domain,
-                  max_addrs_per_domain):
-    server = server_by_name(server_name)
+def request_to_conf(request):
+    return {
+        "debug": request.config.option.server_debug
+    }
+
+
+def server_by_request(request):
+    server_name = request.config.option.server
+    server_conf = request_to_conf(request)
+    return server_by_name(server_name, server_conf)
+
+
+def random_server(server_name, server_conf, min_domains, max_domains,
+                  min_addrs_per_domain, max_addrs_per_domain):
+    server = server_by_name(server_name, server_conf)
 
     num_domains = random.randint(min_domains, max_domains)
 
@@ -390,28 +401,31 @@ def random_server(server_name, min_domains, max_domains, min_addrs_per_domain,
 
 @pytest.fixture(scope='function')
 def server(request):
-    server = random_server(request.config.option.server, 1, 4, 1, 4)
+    server = random_server(request.config.option.server,
+                           request_to_conf(request), 1, 4, 1, 4)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
 def md_server(request):
-    server = random_server(request.config.option.server, 8, 16, 1, 4)
+    server = random_server(request.config.option.server,
+                           request_to_conf(request), 8, 16, 1, 4)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
 def ms_server(request):
-    server = random_server(request.config.option.server, 1, 4, 16, 32)
+    server = random_server(request.config.option.server,
+                           request_to_conf(request), 1, 4, 16, 32)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
 def tls_server(request):
-    server = server_by_name(request.config.option.server)
+    server = server_by_request(request)
     server.configure_random_domain(1, addr_fun=random_tls_addr)
     server.start()
     yield server
@@ -426,8 +440,8 @@ MAX_USER_SUBSCRIPTIONS = 99
 MAX_TOTAL_SUBSCRIPTIONS = 100
 
 
-def limited_server(server_name, resources):
-    server = server_by_name(server_name)
+def limited_server(server_name, server_conf, resources):
+    server = server_by_name(server_name, server_conf)
 
     if not server.supports(ServerFeature.RESOURCE_LIMITS):
         pytest.skip()
@@ -443,30 +457,36 @@ def limited_server(server_name, resources):
 
 @pytest.fixture(scope='function')
 def limited_clients_server(request):
-    server = limited_server(request.config.option.server, {
+    resources = {
         "user": {"clients": MAX_USER_CLIENTS},
         "total": {"clients": MAX_TOTAL_CLIENTS}
-    })
+    }
+    server = limited_server(request.config.option.server,
+                            request_to_conf(request), resources)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
 def limited_services_server(request):
-    server = limited_server(request.config.option.server, {
+    resources = {
         "user": {"services": MAX_USER_SERVICES},
         "total": {"services": MAX_TOTAL_SERVICES}
-    })
+    }
+    server = limited_server(request.config.option.server,
+                            request_to_conf(request), resources)
     yield server
     server.stop()
 
 
 @pytest.fixture(scope='function')
 def limited_subscriptions_server(request):
-    server = limited_server(request.config.option.server, {
+    resources = {
         "user": {"subscriptions": MAX_USER_SUBSCRIPTIONS},
         "total": {"subscriptions": MAX_TOTAL_SUBSCRIPTIONS}
-    })
+    }
+    server = limited_server(request.config.option.server,
+                            request_to_conf(request), resources)
     yield server
     server.stop()
 
@@ -2611,12 +2631,18 @@ def xcm_has_uxf():
 
 
 @pytest.mark.fast
-def test_daemon_hook():
-    open("hook.py", "w+").write("""
+def test_daemon_hook(request):
+    server = server_by_request(request)
+
+    if not server.supports(ServerFeature.HOOK):
+        pytest.skip()
+
+    with open("hook.py", "w+") as f:
+        f.write("""
 def run(servers):
     open("hook.tmp", "w+").write("%d" % len(servers))
 """)
-    server = PafServer()
+
     server.configure_random_domain(1)
     server.hook = "hook.run"
     server.start(python_path=os.getcwd())
@@ -2640,7 +2666,7 @@ def test_handle_signals(request):
 
         assert not os.path.exists(domain_uxf_file)
 
-        server = server_by_name(request.config.option.server)
+        server = server_by_request(request)
 
         server.configure_domain(domain_name, domain_addr)
 
