@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright(c) 2020 Ericsson AB
 
-import sys
+import random
 import select
+import sys
 import time
 
 import paf.client as client
@@ -39,7 +40,7 @@ class EventCounter:
 MAX_BATCH_SIZE = 1024
 
 
-def batch_op(start_num, count, op, done_event):
+def batch_op(count, op, done_event):
     completed = 0
     while completed < count:
         left = count - completed
@@ -48,95 +49,105 @@ def batch_op(start_num, count, op, done_event):
         counter = EventCounter(done_event, batch_size)
 
         for i in range(batch_size):
-            op(start_num + completed + i, counter)
+            op(completed + i, counter)
 
         wait_for(conn, counter.done)
 
         completed += batch_size
 
 
-def subscribe(conn, start_num, count):
+def subscribe(conn, subscription_ids):
     def subscribe_op(i, cb):
-        conn.subscribe(i, cb, filter="(name=service-%d)" % i)
-    batch_op(start_num, count, subscribe_op, client.EventType.ACCEPT)
+        conn.subscribe(subscription_ids[i], cb, filter="(name=service-%d)" % i)
+    batch_op(len(subscription_ids), subscribe_op, client.EventType.ACCEPT)
 
 
-def unsubscribe(conn, start_num, count):
+def unsubscribe(conn, subscription_ids):
     def unsubscribe_op(i, cb):
-        conn.unsubscribe(i, cb)
-    batch_op(start_num, count, unsubscribe_op, client.EventType.COMPLETE)
+        conn.unsubscribe(subscription_ids[i], cb)
+    batch_op(len(subscription_ids), unsubscribe_op, client.EventType.COMPLETE)
 
 
-def publish(conn, start_num, count):
+def publish(conn, service_ids):
     ttl = 1
     generation = 0
 
     def publish_op(i, cb):
-        service_id = i
+        service_id = service_ids[i]
         conn.publish(service_id, generation, {
             "name": {"service-%d" % i},
             "addr": {"tls:10.10.10.10:4711"},
             "color": {"green"}
         }, ttl, cb)
 
-    batch_op(start_num, count, publish_op, client.EventType.COMPLETE)
+    batch_op(len(service_ids), publish_op, client.EventType.COMPLETE)
 
 
-def unpublish(conn, start_num, count):
+def unpublish(conn, service_ids):
     def unpublish_op(i, cb):
-        conn.unpublish(i, cb)
-    batch_op(start_num, count, unpublish_op, client.EventType.COMPLETE)
+        conn.unpublish(service_ids[i], cb)
+    batch_op(len(service_ids), unpublish_op, client.EventType.COMPLETE)
 
 
 def ping(conn, count):
     def ping_op(i, cb):
         conn.ping(cb)
-    batch_op(0, count, ping_op, client.EventType.COMPLETE)
+    batch_op(count, ping_op, client.EventType.COMPLETE)
 
 
-def pre_populate(conn, num_services, num_subscriptions):
-    subscribe(conn, 0, num_subscriptions)
-    publish(conn, 0, num_services)
+def pre_populate(conn, service_ids, subscriptions_ids):
+    subscribe(conn, subscriptions_ids)
+    publish(conn, service_ids)
 
 
-def cleanup(conn, num_services):
-    unpublish(conn, 0, num_services)
+def cleanup(conn, service_ids):
+    unpublish(conn, service_ids)
+
+
+def generate_ids(num):
+    return [random.randint(0, 9223372036854775807) for _ in range(num)]
 
 
 TEST_ITER = 16
 
 
 def benchmark_publish_unpublish(conn, num_services, num_subscriptions):
+    pre_service_ids = generate_ids(num_services)
+    pre_subscription_ids = generate_ids(num_subscriptions)
+
     print("Pathfinder pre-populated state")
     print("------------------------------")
     print("Services: %d" % num_services)
     print("Subscriptions: %d" % num_subscriptions)
 
-    pre_populate(conn, num_services, num_subscriptions)
+    pre_populate(conn, pre_service_ids, pre_subscription_ids)
+
+    service_ids = generate_ids(TEST_ITER)
+    subscription_ids = generate_ids(TEST_ITER)
 
     print("\nResults")
     print("-------")
 
     start = time.time()
-    subscribe(conn, num_subscriptions, TEST_ITER)
+    subscribe(conn, subscription_ids)
     latency = time.time() - start
 
     print("Subscribe: %.3f ms/op" % (1000*(latency/TEST_ITER)))
 
     start = time.time()
-    unsubscribe(conn, num_subscriptions, TEST_ITER)
+    unsubscribe(conn, subscription_ids)
     latency = time.time() - start
 
     print("Unsubscribe: %.3f ms/op" % (1000*(latency/TEST_ITER)))
 
     start = time.time()
-    publish(conn, num_services, TEST_ITER)
+    publish(conn, service_ids)
     latency = time.time() - start
 
     print("Publish: %.3f ms/op" % (1000*(latency/TEST_ITER)))
 
     start = time.time()
-    unpublish(conn, num_services, TEST_ITER)
+    unpublish(conn, service_ids)
     latency = time.time() - start
 
     print("Unpublish: %.3f ms/op" % (1000*(latency/TEST_ITER)))
@@ -147,8 +158,7 @@ def benchmark_publish_unpublish(conn, num_services, num_subscriptions):
 
     print("Ping: %.3f ms/op" % (1000*(latency/TEST_ITER)))
 
-    cleanup(conn, num_services)
-
+    cleanup(conn, pre_service_ids)
 
 if len(sys.argv) != 4:
     usage(sys.argv[0])
