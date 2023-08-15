@@ -2,7 +2,10 @@
 # Copyright(c) 2020 Ericsson AB
 
 #
-# Integration test suite for Pathfinder Server
+# Test suite where a Pathfinder Server is the system under test (SUT)
+#
+# The tests supports both the Python-based server hosted in this repo,
+# and the C-based tpafd implementation.
 #
 
 import collections
@@ -24,14 +27,14 @@ import threading
 import time
 import yaml
 
-from enum import Enum, auto
+from enum import Enum
+
+from feature import ServerFeature
 
 import paf.client as client
 import paf.proto as proto
 import paf.xcm as xcm
 import paf.server
-
-USE_VALGRIND = False
 
 BASE_DIR = os.getcwd()
 
@@ -132,18 +135,11 @@ def is_tls_addr(addr):
     return addr.split(":")[0] == "tls"
 
 
-class ServerFeature(Enum):
-    CONFIG_FILE = auto()
-    RESOURCE_LIMITS = auto()
-    MULTI_SOCKET_DOMAIN = auto()
-    HOOK = auto()
-    ACCESS_CONTROL = auto()
-
-
 class BaseServer:
-    def __init__(self, program_name, debug):
+    def __init__(self, program_name, debug, in_valgrind):
         self.program_name = program_name
         self.debug = debug
+        self.in_valgrind = in_valgrind
         self.domains = []
         self.process = None
         self.crl = None
@@ -329,26 +325,27 @@ class BaseServer:
 
 
 class PafServer(BaseServer):
-    def __init__(self, debug):
-        BaseServer.__init__(self, "pafd", debug)
+    def __init__(self, debug, in_valgrind):
+        BaseServer.__init__(self, "pafd", debug, in_valgrind)
         self.max_clients = 250
         self.use_config_file = random_bool()
 
     def cmd(self):
         return [self.program_name]
 
-    def supports(self, feature):
+    @staticmethod
+    def supports(feature):
         # you enumuerate it, we got it
         return True
 
 
 class TpafServer(BaseServer):
-    def __init__(self, debug):
-        BaseServer.__init__(self, "tpafd", debug)
+    def __init__(self, debug, in_valgrind):
+        BaseServer.__init__(self, "tpafd", debug, in_valgrind)
         self.use_config_file = False
 
     def cmd(self):
-        if USE_VALGRIND:
+        if self.in_valgrind:
             return [
                 "valgrind", "--tool=memcheck", "--leak-check=full",
                 "--error-exitcode=1", "-q", self.program_name
@@ -356,11 +353,17 @@ class TpafServer(BaseServer):
         else:
             return ["tpafd"]
 
-    def supports(self, feature):
+    @staticmethod
+    def supports(feature):
         return False
 
 
 SERVER_NAME_TO_CLASS = {"paf": PafServer, "tpaf": TpafServer}
+
+
+def server_supports(server_name, feature):
+    server_class = SERVER_NAME_TO_CLASS[server_name]
+    return server_class.supports(feature)
 
 
 def server_by_name(server_name, server_conf):
@@ -370,7 +373,8 @@ def server_by_name(server_name, server_conf):
 
 def request_to_conf(request):
     return {
-        "debug": request.config.option.server_debug
+        "debug": request.config.option.server_debug,
+        "in_valgrind": request.config.option.server_valgrind
     }
 
 
@@ -442,9 +446,6 @@ MAX_TOTAL_SUBSCRIPTIONS = 100
 
 def limited_server(server_name, server_conf, resources):
     server = server_by_name(server_name, server_conf)
-
-    if not server.supports(ServerFeature.RESOURCE_LIMITS):
-        pytest.skip()
 
     server.configure_random_domain(1, addr_fun=random_tls_addr)
     server.configure_random_domain(1, addr_fun=random_ux_addr)
@@ -806,10 +807,8 @@ def test_republish_same_generation_orphan_from_different_client_id(server):
 
 
 @pytest.mark.fast
+@pytest.mark.require_access_control
 def test_orphan_causes_rejection_of_client_with_new_user_id(tls_server):
-    if not tls_server.supports(ServerFeature.ACCESS_CONTROL):
-        pytest.skip()
-
     domain_addr = tls_server.default_domain().default_addr()
     client_id = client.allocate_client_id()
 
@@ -1046,10 +1045,8 @@ def test_unpublish_from_different_client_same_user(server):
 
 
 @pytest.mark.fast
+@pytest.mark.require_access_control
 def test_unpublish_from_different_user(tls_server):
-    if not tls_server.supports(ServerFeature.ACCESS_CONTROL):
-        pytest.skip()
-
     domain_addr = tls_server.default_domain().default_addr()
 
     os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
@@ -2195,7 +2192,9 @@ MANY_SERVICES = 5000
 PING_CLIENT_DURATION = 4
 
 
+@pytest.mark.skip_in_valgrind
 def test_large_client_disconnect(server):
+
     domain_addr = server.random_domain().random_addr()
 
     pub_conn = client.connect(domain_addr)
@@ -2417,6 +2416,7 @@ def run_resource_limit(domain_addr, resource_type, user_limit, total_limit,
 
 
 @pytest.mark.fast
+@pytest.mark.require_resource_limits
 def test_max_clients(limited_clients_server):
     domain_addr = limited_clients_server.default_domain().default_addr()
     run_resource_limit(domain_addr, ResourceType.CLIENT, MAX_USER_CLIENTS,
@@ -2424,6 +2424,7 @@ def test_max_clients(limited_clients_server):
 
 
 @pytest.mark.fast
+@pytest.mark.require_resource_limits
 def test_max_services(limited_services_server):
     domain_addr = limited_services_server.default_domain().default_addr()
     run_resource_limit(domain_addr, ResourceType.SERVICE, MAX_USER_SERVICES,
@@ -2432,6 +2433,7 @@ def test_max_services(limited_services_server):
 
 
 @pytest.mark.fast
+@pytest.mark.require_resource_limits
 def test_max_subscriptions(limited_subscriptions_server):
     domain_addr = limited_subscriptions_server.default_domain().default_addr()
     run_resource_limit(domain_addr, ResourceType.SUBSCRIPTION,
@@ -2440,6 +2442,7 @@ def test_max_subscriptions(limited_subscriptions_server):
 
 
 @pytest.mark.fast
+@pytest.mark.require_resource_limits
 def test_default_user_max_services(limited_services_server):
     # use UX to get classified as default user
     domain_ux_addr = limited_services_server.domains[1].default_addr()
@@ -2598,6 +2601,7 @@ def exercise_server(domain_addr):
 ALLOWED_RETRIES = 4
 
 
+@pytest.mark.skip_in_valgrind
 def test_server_leak(tls_server):
     domain_addr = tls_server.default_domain().default_addr()
 
@@ -2631,11 +2635,9 @@ def xcm_has_uxf():
 
 
 @pytest.mark.fast
+@pytest.mark.require_hook
 def test_daemon_hook(request):
     server = server_by_request(request)
-
-    if not server.supports(ServerFeature.HOOK):
-        pytest.skip()
 
     with open("hook.py", "w+") as f:
         f.write("""
