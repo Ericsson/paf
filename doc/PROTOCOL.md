@@ -1051,7 +1051,7 @@ Field Name | Value Type | Mandatory | Description
 -----------|------------|------------|------------
 `client-id` | Int>=0 | Yes | Client identifier.
 `client-addr` | String | Yes | Source address of the client's transport connection.
-`time` | Number | Yes | Client transport connection establishment time, expressed in seconds since the UNIX epoch, in UTC.
+`time` | Int>=0 | Yes | Client transport connection establishment time, expressed in seconds since the UNIX epoch, in UTC.
 
 #### Clients Complete
 
