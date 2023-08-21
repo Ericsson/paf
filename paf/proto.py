@@ -227,7 +227,8 @@ TA_SUBSCRIPTIONS = TransactionType(
     CMD_SUBSCRIPTIONS,
     InteractionType.MULTI_RESPONSE,
     notify_fields=[FIELD_SUBSCRIPTION_ID, FIELD_CLIENT_ID],
-    opt_notify_fields=[FIELD_FILTER]
+    opt_notify_fields=[FIELD_FILTER],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 TA_SERVICES = TransactionType(
@@ -267,7 +268,8 @@ TA_PING = TransactionType(
 TA_CLIENTS = TransactionType(
     CMD_CLIENTS,
     InteractionType.MULTI_RESPONSE,
-    notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME]
+    notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME],
+    opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
 

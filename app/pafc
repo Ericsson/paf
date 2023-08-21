@@ -432,7 +432,7 @@ class PafCli(cmd.Cmd):
 
     def do_unsubscribe(self, line):
         """unsubscribe <subscription-id>
-        Unsubscribe a service."""
+        Remove a subscription."""
         try:
             ta_id = parse_id(line)
             self.worker.cmd_unsubscribe(ta_id)
