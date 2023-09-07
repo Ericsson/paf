@@ -90,8 +90,9 @@ Python version 3.5 or later is required. In case a server
 configuration file is used, and also for running the test cases, the
 `yaml` module is needed.
 
-Pathfinder depends on Extensible Connection-oriented Messaging (XCM),
-in the form of the `libxcm` shared library. The minimum XCM API/ABI
+Pathfinder depends on [Extensible Connection-oriented Messaging
+(XCM)](https://github.com/Ericsson/xcm) in
+the form of the `libxcm` shared library. The minimum XCM API/ABI
 version is 0.15 (found in XCM v1.1.0).
 
 In case `pafc` or `paf.client` are used in combination with per-server
