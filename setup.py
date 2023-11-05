@@ -24,5 +24,5 @@ setuptools.setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: Linux",
     ],
-    python_requires='>=3.5'
+    python_requires='>=3.8'
 )

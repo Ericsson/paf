@@ -86,7 +86,7 @@ outages, server hardware and certain software failures.
 
 The Pathfinder server and related tools are implemented in Python.
 
-Python version 3.5 or later is required. In case a server
+Python version 3.8 or later is required. In case a server
 configuration file is used, and also for running the test cases, the
 `yaml` module is needed.
 
