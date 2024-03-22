@@ -40,6 +40,9 @@ level dead peer detection recommendations are removed.
 
 The `track` command is new in version 3.
 
+Fields specified as Number are now qualified as non-negative numbers
+(which was the case in practice in v2 as well).
+
 ## Data Model
 
 ### Integers
@@ -359,7 +362,7 @@ The message field value MUST be of one of the following types:
 Field Type | Encoding      | Comment
 -----------|---------------|-----------------------------------
 String     | JSON String   |
-Number     | JSON Number   | Integer or floating point.
+Number>=0  | JSON Number   | Non-negative integer or floating point number.
 Props      | JSON Object   |
 Int>=0     | JSON Number   | Integer in the range 0 to (1 << 63) - 1 (inclusive).
 
@@ -791,7 +794,7 @@ Field Name | Value Type | Mandatory | Description
 `service-props` | Props | Yes | The complete set of service properties.
 `ttl` | Int>=0 | Yes | Service time-to-live (in seconds).
 `client-id` | Int>=0 | Yes | Service's current owner.
-`orphan-since` | Number | No | Time when contact to the owning client was lost, expressed in seconds since the UNIX epoch, in UTC. If left out, the owning client is in contact with the server.
+`orphan-since` | Number>=0 | No | Time when contact to the owning client was lost, expressed in seconds since the UNIX epoch, in UTC. If left out, the owning client is in contact with the server.
 
 #### Subscribe Complete
 
@@ -954,7 +957,7 @@ Field Name | Value Type | Mandatory | Description
 `service-props` | Props | Yes | Service properties.
 `ttl` | Int>=0 | Yes | Service time-to-live (in seconds).
 `client-id` | Int>=0 | Yes | Service's current owner.
-`orphan-since` | Number | No | Time when contact to the owning client was lost, expressed in seconds since the UNIX epoch, in UTC. If left out, the owning client is in contact with the server.
+`orphan-since` | Number>=0 | No | Time when contact to the owning client was lost, expressed in seconds since the UNIX epoch, in UTC. If left out, the owning client is in contact with the server.
 
 #### Services Complete
 
@@ -1167,6 +1170,8 @@ Field Name | Value Type | Mandatory | Description
 `client-id` | Int>=0 | Yes | Client identifier.
 `client-addr` | String | Yes | Source address of the client's transport connection.
 `time` | Int>=0 | Yes | Client transport connection establishment time, expressed in seconds since the UNIX epoch, in UTC.
+`idle` | Number>=0 | Yes | The time in seconds since last the client was heard from.
+`latency` | Number>=0 | No | The client track query response time latency (including network delay) in seconds.
 
 #### Clients Complete
 

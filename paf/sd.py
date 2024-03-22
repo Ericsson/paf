@@ -304,13 +304,13 @@ class Connection:
         self.timer_manager = timer_manager
         self.max_idle_time = max_idle_time
         self.idle_cb = idle_cb
-        self.track_query_cb = None
         self.subscriptions = {}
         self.services = {}
         self.connected_at = time.time()
         self.disconnected_at = None
         self.idle_state = IdleState.ACTIVE
         self.idle_timer = None
+        self.last_seen = 0
         self.install_idle_warning_timer()
 
     def client_id(self):
@@ -366,6 +366,8 @@ class Connection:
         if self.idle_state != IdleState.TIMED_OUT:
             self.idle_state = IdleState.ACTIVE
             self.install_idle_warning_timer()
+
+        self.last_seen = time.time()
 
     def check_idle(self):
         if self.idle_state == IdleState.ACTIVE:
@@ -478,6 +480,10 @@ class Client:
 
     def is_connected(self):
         return self.active_connection is not None
+
+    def last_seen(self):
+        if self.is_connected():
+            return self.active_connection.last_seen
 
     def is_stale(self):
         for connection in self.get_connections():
@@ -657,12 +663,6 @@ class Client:
 
         service.remove()
 
-    def track(self, query_cb):
-        if self.active_connection.is_tracked():
-            raise AlreadyExistsError("track")
-
-        self.active_connection.track(query_cb)
-
     def create_subscription(self, sub_id, filter, match_cb):
         if self.db.has_subscription(sub_id):
             raise AlreadyExistsError("subscription", sub_id)
@@ -742,6 +742,10 @@ class ServiceDiscovery:
 
     def has_client(self, client_id):
         return self.db.has_client(client_id)
+
+    def client_last_seen(self, client_id):
+        client = self.db.get_client(client_id)
+        return client.last_seen()
 
     def max_total_clients(self):
         return self.resource_manager.max_total_resources[ResourceType.CLIENT]

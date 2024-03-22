@@ -389,7 +389,8 @@ class Client:
                                   response_cb)
 
     def clients(self, response_cb=None):
-        return self.issue_request(proto.TA_CLIENTS, (), {}, NotifyCall,
+        ta_type = proto.lookup_type(self.proto_version, proto.CMD_CLIENTS)
+        return self.issue_request(ta_type, (), {}, NotifyCall,
                                   response_cb)
 
     def service_id(self):

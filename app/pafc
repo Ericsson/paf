@@ -232,12 +232,37 @@ class Worker(Thread):
     def _cmd_clients(self):
         try:
             clients = self.conn.clients()
-            print("Client Id          Remote Address    Session Uptime")
+
+            extended = self.conn.proto_version >= 3
+
+            header = "Client Id         Remote Address    Uptime"
+            if extended:
+                header += "     Idle [s]   Latency [ms]"
+            print(header)
+
             for c in clients:
-                client_id, client_addr, client_time = c
+                client_id = c[0]
+                client_addr = c[1]
+                client_time = c[2]
                 client_uptime = int(round(time.time() - client_time))
                 uptime_s = datetime.timedelta(seconds=client_uptime)
-                print("%-17x  %-17s %s" % (client_id, client_addr, uptime_s))
+
+                line = "%-16x  %-17s %-10s" % (client_id, client_addr,
+                                               uptime_s)
+
+                if extended:
+                    client_idle_s = "%.3f" % c[3]
+
+                    if len(c) == 5:
+                        client_latency = c[4].get("latency")
+                        client_latency_s = "%.1f" % (client_latency * 1e3)
+                    else:
+                        client_latency_s = "-"
+
+                    line += " %-10s %-10s" % (client_idle_s, client_latency_s)
+
+                print(line)
+
             self._ok()
         except client.Error as e:
             self._fail(e)

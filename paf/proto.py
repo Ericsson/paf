@@ -79,7 +79,7 @@ class NonNegativeIntField(Field):
         return value
 
 
-class NumberField(Field):
+class NonNegativeNumberField(Field):
     def pull(self, value, opt=False):
         value = Field.pull(self, value, opt=opt)
         if value is None:
@@ -87,6 +87,9 @@ class NumberField(Field):
         if not isinstance(value, (int, float)):
             raise ProtocolError("Message field %s is not a number" %
                                 self.name)
+        if value < 0:
+            raise ProtocolError("Message field %s has a negative "
+                                "value %d" % (self.name, value))
         return value
 
 
@@ -145,7 +148,7 @@ FIELD_SERVICE_ID = NonNegativeIntField('service-id')
 FIELD_GENERATION = NonNegativeIntField('generation')
 
 FIELD_TTL = NonNegativeIntField('ttl')
-FIELD_ORPHAN_SINCE = NumberField('orphan-since')
+FIELD_ORPHAN_SINCE = NonNegativeNumberField('orphan-since')
 
 FIELD_SUBSCRIPTION_ID = NonNegativeIntField('subscription-id')
 
@@ -154,6 +157,9 @@ FIELD_FILTER = StringField('filter')
 FIELD_CLIENT_ID = NonNegativeIntField('client-id')
 FIELD_CLIENT_ADDR = StringField('client-address')
 FIELD_TIME = NonNegativeIntField('time')
+
+FIELD_LATENCY = NonNegativeNumberField('latency')
+FIELD_IDLE = NonNegativeNumberField('idle')
 
 FIELD_MATCH_TYPE = StringField('match-type')
 
@@ -332,10 +338,20 @@ TA_PING = TransactionType(
     opt_fail_fields=[FIELD_FAIL_REASON]
 )
 
-TA_CLIENTS = TransactionType(
+TA_CLIENTSv2 = TransactionType(
     CMD_CLIENTS,
     InteractionType.MULTI_RESPONSE,
+    proto_versions=[2],
     notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME],
+    opt_fail_fields=[FIELD_FAIL_REASON]
+)
+
+TA_CLIENTSv3 = TransactionType(
+    CMD_CLIENTS,
+    InteractionType.MULTI_RESPONSE,
+    proto_versions=[3],
+    notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME, FIELD_IDLE],
+    opt_notify_fields=[FIELD_LATENCY],
     opt_fail_fields=[FIELD_FAIL_REASON]
 )
 

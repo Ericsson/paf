@@ -270,6 +270,8 @@ class Connection:
         self.connect_time = time.time()
         self.handshaked = False
         self.track_ta_id = None
+        self.track_query_ts = None
+        self.track_latency = None
         self.info("Accepted new client connection from \"%s\"." %
                   self.conn_addr, LogCategory.PROTOCOL)
 
@@ -488,6 +490,9 @@ class Connection:
     def is_tracked(self):
         return self.track_ta_id is not None and self.track_ta_id in self.tas
 
+    def has_outstanding_track_query(self):
+        return self.is_tracked() and self.track_query_ts is not None
+
     def track_request(self, ta):
         if self.is_tracked():
             self.warning("Track transaction already exists.",
@@ -504,8 +509,14 @@ class Connection:
             yield ta.notify(proto.TRACK_TYPE_REPLY)
             self.debug("Replied to track query.", LogCategory.CORE)
         elif track_type == proto.TRACK_TYPE_REPLY:
-            self.debug("Received to track query reply.", LogCategory.CORE)
-            # XXX: assure that there was an outstanding query
+            if self.track_query_ts is None:
+                raise ProtocolError("Received unsolicited track reply in "
+                                    "track transaction %d", track_type,
+                                    ta.ta_id)
+            self.track_latency = time.time() - self.track_query_ts
+            self.track_query_ts = None
+            self.debug("Received to track query reply (after %.1f ms)." %
+                       (1e3 * self.track_latency), LogCategory.CORE)
         else:
             raise ProtocolError("Received unknown track type \"%s\" in "
                                 "track transaction %d", track_type,
@@ -669,14 +680,22 @@ class Connection:
 
     def clients_request(self, ta):
         yield ta.accept()
+
+        now = time.time()
+
         for conn in self.server.client_connections.values():
+            idle = now - self.sd.client_last_seen(conn.client_id)
+
+            optargs = {}
+            if conn.is_tracked():
+                optargs["latency"] = conn.track_latency
+
             yield ta.notify(conn.client_id, conn.conn_addr,
-                            int(conn.connect_time))
+                            int(conn.connect_time), idle, **optargs)
         yield ta.complete()
 
     def track_query(self, ta):
-        # To avoid multiple outstanding queries, one could introduce
-        # a counter and ignore superflous requests
+        self.track_query_ts = time.time()
         self.respond(ta.notify(proto.TRACK_TYPE_QUERY))
 
     def subscription_triggered(self, sub_id, match_type, service):
@@ -729,12 +748,13 @@ class Connection:
         self.term_cb(self)
 
     def check_idle(self):
+        self.debug("Performing idle check.", LogCategory.PROTOCOL)
         # In Pathfinder protocol versions prior to 3, the transport
         # connection is used as an indication of the remote peer being
         # alive. If the connection is alive, the client is alive.
         if self.proto_version < 3:
             self.sd.client_active(self.client_id)
-        elif self.is_tracked():
+        elif self.is_tracked() and not self.has_outstanding_track_query():
             self.track_query(self.tas[self.track_ta_id])
 
     def time_out(self):
@@ -913,8 +933,6 @@ class Server:
     def client_idle(self, client, warning):
         conn = self.client_connections[client.client_id]
         if warning:
-            self.debug("Performing idle check on client %d" %
-                       client.client_id, LogCategory.PROTOCOL)
             conn.check_idle()
         else:
             self.debug("Connection for client %d timed out" %
