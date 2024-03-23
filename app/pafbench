@@ -69,7 +69,7 @@ def unsubscribe(conn, subscription_ids):
 
 
 def publish(conn, service_ids):
-    ttl = 1
+    ttl = 30
     generation = 0
 
     def publish_op(i, cb):
