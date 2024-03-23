@@ -26,6 +26,9 @@ ProtocolError = proto.ProtocolError
 TransportError = proto.TransportError
 Error = proto.Error
 
+PROTO_VERSION_RANGE = proto.VERSION_RANGE
+PROTO_VERSIONS = proto.VERSIONS
+
 
 class TransactionError(Error):
     def __init__(self, reason=None):

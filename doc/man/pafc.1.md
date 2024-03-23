@@ -3,8 +3,8 @@ pafc(1) -- service discovery client
 
 ## SYNOPSIS
 
-`pafc` [-i <client_id>] <addr><br>
-`pafc` [-i <client_id>] [-n <server-index>>] <domain><br>
+`pafc` [-i <client_id>] [-p <version>] <addr><br>
+`pafc` [-i <client_id>] [-p <version>] [-n <server-index>>] <domain><br>
 `pafc` [-a] <domain><br>
 `pafc` -l<br>
 `pafc` -h
@@ -34,6 +34,8 @@ in the list will be used.
  * `-i <client_id>`
    Specify the client identifier to be used, in hexadecimal format. If
    not set, pafc uses a randomly generated id.
+ * `-p <version>`
+   Specify the protocol version to be advertised to the server.
  * `-n <server-index>`
    Connect to server address at <server-index> in the list of servers
    for the specified domain. Default is 0.
