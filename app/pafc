@@ -256,7 +256,7 @@ class Worker(Thread):
 
             header = "Client Id         Remote Address    Uptime"
             if extended:
-                header += "     Idle [s]   Latency [ms]"
+                header += "     Idle [s]   Latency [ms]  Version"
             print(header)
 
             for c in clients:
@@ -271,14 +271,16 @@ class Worker(Thread):
 
                 if extended:
                     client_idle_s = "%.3f" % c[3]
+                    client_proto_version = c[4]
 
-                    if len(c) == 5:
-                        client_latency = c[4].get("latency")
+                    if len(c) == 6:
+                        client_latency = c[5].get("latency")
                         client_latency_s = "%.1f" % (client_latency * 1e3)
                     else:
                         client_latency_s = "-"
 
-                    line += " %-10s %-10s" % (client_idle_s, client_latency_s)
+                    line += " %-10s %-10s    %d" % \
+                        (client_idle_s, client_latency_s, client_proto_version)
 
                 print(line)
 

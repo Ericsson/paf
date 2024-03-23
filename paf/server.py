@@ -694,7 +694,8 @@ class Connection:
 
             if extended:
                 yield ta.notify(conn.client_id, conn.conn_addr,
-                                int(conn.connect_time), idle, **optargs)
+                                int(conn.connect_time), idle,
+                                conn.proto_version, **optargs)
             else:
                 yield ta.notify(conn.client_id, conn.conn_addr,
                                 int(conn.connect_time))

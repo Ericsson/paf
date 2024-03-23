@@ -350,7 +350,8 @@ TA_CLIENTSv3 = TransactionType(
     CMD_CLIENTS,
     InteractionType.MULTI_RESPONSE,
     proto_versions=[3],
-    notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME, FIELD_IDLE],
+    notify_fields=[FIELD_CLIENT_ID, FIELD_CLIENT_ADDR, FIELD_TIME, FIELD_IDLE,
+                   FIELD_PROTO_VERSION],
     opt_notify_fields=[FIELD_LATENCY],
     opt_fail_fields=[FIELD_FAIL_REASON]
 )
