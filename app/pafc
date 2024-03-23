@@ -218,6 +218,19 @@ class Worker(Thread):
     def cmd_hello(self):
         self.dispatch_fun(self._cmd_hello)
 
+    def _cmd_version(self):
+        try:
+            print("Protocol version:")
+            print("  Supported by client: %d-%d" % client.PROTO_VERSION_RANGE)
+            print("  Advertised: %d-%d" % self.conn.proto_version_range)
+            print("  Used: %d" % self.conn.proto_version)
+            self._ok()
+        except client.Error as e:
+            self._fail(e)
+
+    def cmd_version(self):
+        self.dispatch_fun(self._cmd_version)
+
     def _cmd_track(self):
         if self.tracker is None:
             self.tracker = Tracker(self.conn)
@@ -447,6 +460,11 @@ class PafCli(cmd.Cmd):
         """hello
         Ask server for client id and version information."""
         self.worker.cmd_hello()
+
+    def do_version(self, line):
+        """version
+        Query protocol version information."""
+        self.worker.cmd_version()
 
     def do_track(self, line):
         """track
