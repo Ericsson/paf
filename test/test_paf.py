@@ -2229,10 +2229,11 @@ def test_many_clients(server):
 FEW_CLIENTS = 4
 
 
-@pytest.mark.fast
-def test_list_clients(server):
+def run_list_clients(server, proto_version):
     domain = server.random_domain()
-    conn = client.connect(domain.default_addr())
+    proto_version_range = (proto_version, proto_version)
+    conn = client.connect(domain.default_addr(),
+                          proto_version_range=proto_version_range)
 
     other_conns = []
     for i in range(FEW_CLIENTS):
@@ -2250,6 +2251,16 @@ def test_list_clients(server):
     for other_conn in other_conns:
         other_conn.close()
     conn.close()
+
+
+@pytest.mark.fast
+def test_list_clients_v2(server):
+    run_list_clients(server, 2)
+
+
+@pytest.mark.fast
+def test_list_clients_v3(server):
+    run_list_clients(server, 3)
 
 
 @pytest.mark.fast

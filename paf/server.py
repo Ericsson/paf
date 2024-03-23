@@ -683,6 +683,8 @@ class Connection:
 
         now = time.time()
 
+        extended = self.proto_version >= 3
+
         for conn in self.server.client_connections.values():
             idle = now - self.sd.client_last_seen(conn.client_id)
 
@@ -690,8 +692,13 @@ class Connection:
             if conn.is_tracked():
                 optargs["latency"] = conn.track_latency
 
-            yield ta.notify(conn.client_id, conn.conn_addr,
-                            int(conn.connect_time), idle, **optargs)
+            if extended:
+                yield ta.notify(conn.client_id, conn.conn_addr,
+                                int(conn.connect_time), idle, **optargs)
+            else:
+                yield ta.notify(conn.client_id, conn.conn_addr,
+                                int(conn.connect_time))
+
         yield ta.complete()
 
     def track_query(self, ta):
