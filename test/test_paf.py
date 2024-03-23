@@ -2501,7 +2501,8 @@ class ConsumerProcess(spawn_mp.Process):
     def connect(self):
         try:
             self.conn = \
-                client.connect(self.domain_addr, ready_cb=self.make_ready)
+                client.connect(self.domain_addr, ready_cb=self.make_ready,
+                               track=True)
             wait(self.conn, lambda: self.ready, CONNECT_TIMEOUT)
         except proto.Error:
             pass
