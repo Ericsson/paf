@@ -311,7 +311,8 @@ class Connection:
         self.idle_state = IdleState.ACTIVE
         self.idle_timer = None
         self.last_seen = 0
-        self.install_idle_warning_timer()
+        if max_idle_time is not None:
+            self.install_idle_warning_timer()
 
     def client_id(self):
         return self.client.client_id
@@ -365,25 +366,31 @@ class Connection:
     def active(self):
         if self.idle_state != IdleState.TIMED_OUT:
             self.idle_state = IdleState.ACTIVE
-            self.install_idle_warning_timer()
+
+            if self.max_idle_time is not None:
+                self.install_idle_warning_timer()
 
         self.last_seen = time.time()
 
     def check_idle(self):
+        assert self.max_idle_time is not None
+
         if self.idle_state == IdleState.ACTIVE:
             self.issue_idle_warning()
 
     def install_idle_timer(self, t):
+        assert self.max_idle_time is not None
         self.uninstall_idle_timer()
         self.idle_timer = \
             self.timer_manager.add(self.idle_timer_fired, t, relative=True)
 
     def idle_time(self):
-        t = self.max_idle_time
-        if len(self.services) > 0:
-            t = min(t, self.get_lowest_ttl())
-        t = max(t, MIN_IDLE_TIME)
-        return t
+        if self.max_idle_time is not None:
+            t = self.max_idle_time
+            if len(self.services) > 0:
+                t = min(t, self.get_lowest_ttl())
+            t = max(t, MIN_IDLE_TIME)
+            return t
 
     def install_idle_warning_timer(self):
         self.install_idle_timer(WARNING_THRESHOLD * self.idle_time())

@@ -448,14 +448,27 @@ class Connection:
 
         if self.proto_version is not None:
             try:
+                if self.proto_version >= 3:
+                    max_idle_time = self.max_idle_time
+                else:
+                    max_idle_time = None
+
                 self.sd.client_connect(self.client_id, user_id,
-                                       self.max_idle_time, self.idle_cb)
+                                       max_idle_time, self.idle_cb)
+
                 self.debug("Handshake producedure finished for client from "
                            "\"%s\"." % self.conn_addr, LogCategory.PROTOCOL)
                 self.debug("Protocol version %d is selected." %
                            self.proto_version, LogCategory.PROTOCOL)
+
+                if max_idle_time is not None:
+                    self.debug("Initial max idle time is %d s." %
+                               max_idle_time, LogCategory.PROTOCOL)
+                self.max_idle_time = max_idle_time
+
                 self.handshaked = True
                 self.handshake_cb(self)
+
                 yield ta.complete(self.proto_version)
 
                 self.configure_tcp_keepalive()
