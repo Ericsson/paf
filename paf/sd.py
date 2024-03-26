@@ -310,7 +310,7 @@ class Connection:
         self.disconnected_at = None
         self.idle_state = IdleState.ACTIVE
         self.idle_timer = None
-        self.last_seen = 0
+        self.last_seen = time.time()
         if max_idle_time is not None:
             self.install_idle_warning_timer()
 
