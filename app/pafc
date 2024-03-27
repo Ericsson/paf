@@ -178,8 +178,9 @@ class Worker(Thread):
         # just calling _exit() leaves the terminal in a messed-up state
         os.kill(os.getpid(), signal.SIGTERM)
 
-    def dispatch_fun(self, fun):
+    def dispatch_fun(self, fun, args=()):
         self.fun = fun
+        self.fun_args = args
         self.wpipe.write(b'\0')
         self.fun_done.acquire()
 
@@ -187,7 +188,7 @@ class Worker(Thread):
         try:
             d = self.rpipe.read(1)
             if d is not None:
-                self.fun()
+                self.fun(*self.fun_args)
                 self.fun = None
                 self.fun_done.release()
         except IOError:
@@ -260,15 +261,15 @@ class Worker(Thread):
     def cmd_track_query(self):
         self.dispatch_fun(self._cmd_track_query)
 
-    def _cmd_track_verbose(self):
+    def _cmd_track_set_verbose(self, on):
         if self.tracker is not None:
-            self.tracker.verbose = True
+            self.tracker.verbose = on
             self._ok()
         else:
             self._fail("Connection has no track transaction.")
 
-    def cmd_track_verbose(self):
-        self.dispatch_fun(self._cmd_track_verbose)
+    def cmd_track_set_verbose(self, on):
+        self.dispatch_fun(self._cmd_track_set_verbose, args=(on,))
 
     def _cmd_clients(self):
         try:
@@ -491,7 +492,7 @@ class PafCli(cmd.Cmd):
         self.worker.cmd_version()
 
     def do_track(self, line):
-        """track [verbose|query]
+        """track [query|verbose|quiet]
         Manage a track transaction.
 
         The purpose of a track transaction is to allow the server and the
@@ -504,8 +505,11 @@ class PafCli(cmd.Cmd):
         pafc will reply to any track queries received from the server within
         the track transaction.
 
-        'track verbose' will result in server-initiated query to be
-        logged to the console.
+        'track verbose' results in server-initiated queries to be logged to
+        the console.
+
+        'track quiet' results in server-initiated queries not being logged
+        to the console. This is the default.
 
         This command is only available on protocol version 3 connections.
 """
@@ -516,7 +520,9 @@ class PafCli(cmd.Cmd):
             if args[0] == 'query':
                 self.worker.cmd_track_query()
             elif args[0] == 'verbose':
-                self.worker.cmd_track_verbose()
+                self.worker.cmd_track_set_verbose(True)
+            elif args[0] == 'quiet':
+                self.worker.cmd_track_set_verbose(False)
             else:
                 print("Unknown track sub-command '%s'." % args[0])
         else:
