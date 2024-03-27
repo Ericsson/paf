@@ -109,6 +109,7 @@ class Tracker:
         self.failed = False
         self.ta_id = self.conn.track(self)
         self.queries = collections.deque()
+        self.verbose = False
 
     def __call__(self, ta_id, event, *args, **optargs):
         if event == client.EventType.ACCEPT:
@@ -120,7 +121,8 @@ class Tracker:
             track_type = args[0]
             if track_type == client.TRACK_TYPE_QUERY:
                 self.conn.track_reply(ta_id)
-                print("Responded to track query notification.")
+                if self.verbose:
+                    print("Responded to track query notification.")
             else:
                 if len(self.queries) > 0:
                     latency = time.time() - self.queries.popleft()
@@ -243,10 +245,30 @@ class Worker(Thread):
             else:
                 self._fail(self.tracker.fail_reason)
         else:
-            self.tracker.query()
+            self._fail("Connection already has a track transaction.")
 
     def cmd_track(self):
         self.dispatch_fun(self._cmd_track)
+
+    def _cmd_track_query(self):
+        if self.tracker is not None:
+            self.tracker.query()
+            self._ok()
+        else:
+            self._fail("Connection has no track transaction.")
+
+    def cmd_track_query(self):
+        self.dispatch_fun(self._cmd_track_query)
+
+    def _cmd_track_verbose(self):
+        if self.tracker is not None:
+            self.tracker.verbose = True
+            self._ok()
+        else:
+            self._fail("Connection has no track transaction.")
+
+    def cmd_track_verbose(self):
+        self.dispatch_fun(self._cmd_track_verbose)
 
     def _cmd_clients(self):
         try:
@@ -469,23 +491,36 @@ class PafCli(cmd.Cmd):
         self.worker.cmd_version()
 
     def do_track(self, line):
-        """track
-        Initiate track transaction.
+        """track [verbose|query]
+        Manage a track transaction.
 
         The purpose of a track transaction is to allow the server and the
         client to ensure that the remote peer is still alive.
 
-        The first use of this command initiates a track protocol transaction.
+        'track' without any arguments initates a track protocol transaction.
 
-        Subsequently use of this command results in a track query being sent
-        to the server.
+        'track query' results in a track query being sent to the server.
 
         pafc will reply to any track queries received from the server within
-        the track transaction, and notify the user that so has been done.
+        the track transaction.
+
+        'track verbose' will result in server-initiated query to be
+        logged to the console.
 
         This command is only available on protocol version 3 connections.
 """
-        self.worker.cmd_track()
+        args = shlex.split(line)
+        if len(args) == 0:
+            self.worker.cmd_track()
+        elif len(args) == 1:
+            if args[0] == 'query':
+                self.worker.cmd_track_query()
+            elif args[0] == 'verbose':
+                self.worker.cmd_track_verbose()
+            else:
+                print("Unknown track sub-command '%s'." % args[0])
+        else:
+            print("Too many arguments.")
 
     def do_services(self, line):
         """services [<filter-expression>]
