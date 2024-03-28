@@ -24,7 +24,7 @@ originating client, and server state may thus be recreated, if needed.
 
 ## Document Version
 
-This is version 3.0.0-draft.1 of the Pathfinder protocol
+This is version 3.0.0-draft.2 of the Pathfinder protocol
 specification.
 
 ## Protocol Version
@@ -39,6 +39,8 @@ protocol-level keepalive mechanism. The transport protocol
 level dead peer detection recommendations are removed.
 
 The `track` command is new in version 3.
+
+The `clients` command has been extended.
 
 Fields specified as Number are now qualified as non-negative numbers
 (which was the case in practice in v2 as well).
