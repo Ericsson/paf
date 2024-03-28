@@ -279,14 +279,34 @@ class Tracker:
 
 
 class ServerConf:
-    def __init__(self, addr):
+    def __init__(self, addr, proto_version_min=proto.MIN_VERSION,
+                 proto_version_max=proto.MAX_VERSION):
         self.addr = addr
+        self.proto_version_min = proto_version_min
+        self.proto_version_max = proto_version_max
         self.attrs = {}
+
+    def check_proto_version_range(self, supported_range):
+        if self.proto_version_min > proto.MAX_VERSION:
+            raise ProtocolError("Minimum configured protocol version "
+                                "is higher than highest supported by "
+                                "client")
+
+        if self.proto_version_max < proto.MIN_VERSION:
+            raise ProtocolError("Maximum configured protocol version "
+                                "is lower than lowest supported by "
+                                "client")
+
+    def proto_version_range(self):
+        return (self.proto_version_min, self.proto_version_max)
+
+    def set_proto_version(self, proto_version):
+        self.proto_version_min = proto_version
+        self.proto_version_max = proto_version
 
 
 class Client:
-    def __init__(self, client_id, server_conf, proto_version_range,
-                 track, ready_cb):
+    def __init__(self, client_id, server_conf, track, ready_cb):
         self.client_id = client_id
         try:
             attrs = {'xcm.blocking': False}
@@ -294,7 +314,11 @@ class Client:
             self.conn_sock = xcm.connect(server_conf.addr, attrs=attrs)
         except xcm.error as e:
             raise TransportError(str(e))
-        self.proto_version_range = proto_version_range
+
+        server_conf.check_proto_version_range(proto.VERSION_RANGE)
+
+        self.proto_version_range = server_conf.proto_version_range()
+
         if track:
             self.tracker = Tracker(self)
         else:
@@ -556,6 +580,12 @@ def parse_domain_json(data):
         for json_name, xcm_name in DOMAIN_FILE_TO_XCM_ATTR.items():
             if json_name in server_obj:
                 server.attrs[xcm_name] = server_obj[json_name]
+
+        if "minProtocolVersion" in server_obj:
+            server.proto_version_min = server_obj["minProtocolVersion"]
+        if "maxProtocolVersion" in server_obj:
+            server.proto_version_max = server_obj["maxProtocolVersion"]
+
         servers.append(server)
     return servers
 
@@ -595,11 +625,11 @@ def allocate_client_id():
 
 
 def connect(domain_or_addr_or_conf, client_id=None, ready_cb=None,
-            proto_version_range=proto.VERSION_RANGE, track=False):
+            track=False):
     if isinstance(domain_or_addr_or_conf, ServerConf):
         server = domain_or_addr_or_conf
     else:
         server = domain_server(domain_or_addr_or_conf)
     if client_id is None:
         client_id = allocate_client_id()
-    return Client(client_id, server, proto_version_range, track, ready_cb)
+    return Client(client_id, server, track, ready_cb)

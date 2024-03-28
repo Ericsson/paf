@@ -702,18 +702,22 @@ def test_hello(server):
     assert conn.proto_version == proto.MAX_VERSION
 
 
+def run_hello_vn_only(server, proto_version):
+    conf = client.ServerConf(server.random_domain().random_addr(),
+                             proto_version_min=proto_version,
+                             proto_version_max=proto_version)
+    conn = client.connect(conf)
+    assert conn.proto_version == proto_version
+
+
 @pytest.mark.fast
 def test_hello_v2_only(server):
-    conn = client.connect(server.random_domain().random_addr(),
-                          proto_version_range=(2, 2))
-    assert conn.proto_version == 2
+    run_hello_vn_only(server, 2)
 
 
 @pytest.mark.fast
 def test_hello_v3_only(v3_server):
-    conn = client.connect(v3_server.random_domain().random_addr(),
-                          proto_version_range=(3, 3))
-    assert conn.proto_version == 3
+    run_hello_vn_only(v3_server, 3)
 
 
 def test_server_tracking_client(impatient_server):
@@ -821,8 +825,10 @@ def test_ttl_induced_tracking(server):
 
 
 def test_v2_client_not_timed_out(server):
-    conn = client.connect(server.random_domain().random_addr(),
-                          proto_version_range=(2, 2))
+    conf = client.ServerConf(server.random_domain().random_addr(),
+                             proto_version_max=2)
+    conn = client.connect(conf)
+
     assert conn.proto_version == 2
 
     service_id = conn.service_id()
@@ -2231,9 +2237,10 @@ FEW_CLIENTS = 4
 
 def run_list_clients(server, proto_version):
     domain = server.random_domain()
-    proto_version_range = (proto_version, proto_version)
-    conn = client.connect(domain.default_addr(),
-                          proto_version_range=proto_version_range)
+    conf = client.ServerConf(domain.default_addr(),
+                             proto_version_min=proto_version,
+                             proto_version_max=proto_version)
+    conn = client.connect(conf)
 
     other_conns = []
     for i in range(FEW_CLIENTS):

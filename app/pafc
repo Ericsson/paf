@@ -30,7 +30,7 @@ def usage(name):
     print("    -i <client_id>     Set client id to use, in hexadecimal. If "
           "not set, an\n"
           "                       id will be generated.")
-    print("    -p <version>       Configure Pathfinder protocol version to be "
+    print("    -p <version>       Override Pathfinder protocol version to be "
           "advertised\n"
           "                       to the server. Versions %d-%d are "
           "supported." % client.PROTO_VERSION_RANGE)
@@ -40,12 +40,11 @@ def usage(name):
     print("    -l                 List all domains.")
 
 
-def connect(server, client_id, proto_version_range):
+def connect(server, client_id):
     try:
-        return client.connect(server, client_id=client_id,
-                              proto_version_range=proto_version_range)
+        return client.connect(server, client_id=client_id)
     except client.Error as e:
-        print("Error communicationg with Patherfind server: %s." % str(e))
+        print("Error communicating with Patherfinder server: %s." % str(e))
         sys.exit(1)
 
 
@@ -433,8 +432,8 @@ class Worker(Thread):
             print("Operation failed for unknown reasons.")
 
 
-def init(server, client_id, proto_version_range):
-    conn = connect(server, client_id, proto_version_range)
+def init(server, client_id):
+    conn = connect(server, client_id)
     worker = Worker(conn)
     worker.start()
     return worker
@@ -656,7 +655,7 @@ if __name__ == '__main__':
         client_id = None
         list_addrs = False
         server_num = None
-        proto_version_range = client.PROTO_VERSION_RANGE
+        proto_version = None
 
         optlist, args = getopt.getopt(sys.argv[1:], 'i:p:n:alh')
 
@@ -669,7 +668,6 @@ if __name__ == '__main__':
                     print("Protocol version %d is not supported." %
                           proto_version)
                     sys.exit(1)
-                proto_version_range = (proto_version, proto_version)
             elif opt == '-n':
                 server_num = int(optval)
             elif opt == '-a':
@@ -702,7 +700,10 @@ if __name__ == '__main__':
                 print("No server address with index %d." % server_num)
                 sys.exit(1)
 
-        worker = init(server, client_id, proto_version_range)
+        if proto_version is not None:
+            server.set_proto_version(proto_version)
+
+        worker = init(server, client_id)
 
         cli = PafCli(worker)
 
