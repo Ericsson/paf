@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright(c) 2020 Ericsson AB
 
-import json
 from collections import deque
 from enum import Enum, auto
 from itertools import chain
@@ -10,7 +9,7 @@ import time
 
 import paf.xcm as xcm
 import paf.proto as proto
-from paf.proto import ProtocolError
+from paf.proto import ProtocolError, Message
 import paf.sd as sd
 import paf.filter
 import paf.props as props
@@ -23,110 +22,6 @@ MINOR_VERSION = 1
 PATCH_VERSION = 0
 
 VERSION = "%d.%d.%d" % (MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)
-
-
-class Message:
-    @staticmethod
-    def parse(proto_version, in_wire_msg):
-        if proto_version is None:
-            # provisonal version, to recognize hello
-            proto_version = proto.MIN_VERSION
-        try:
-            in_msg = json.loads(in_wire_msg.decode('utf-8'))
-
-            cmd = proto.FIELD_TA_CMD.pull(in_msg)
-            ta_id = proto.FIELD_TA_ID.pull(in_msg)
-            msg_type = proto.FIELD_MSG_TYPE.pull(in_msg)
-
-            ta_type = proto.lookup_type(proto_version, cmd)
-
-            fields = ta_type.fields.get(msg_type)
-            opt_fields = ta_type.opt_fields.get(msg_type)
-
-            if fields is None:
-                raise proto.ProtocolError("Incoming request is of invalid "
-                                          "type \"%s\"" % msg_type)
-
-            args = []
-            for field in fields:
-                args.append(field.pull(in_msg))
-
-            optargs = {}
-            for field in opt_fields:
-                arg = field.pull(in_msg, opt=True)
-                if arg is not None:
-                    optargs[field.name] = arg
-
-            if len(in_msg) > 0:
-                raise ProtocolError("Message contains unknown field(s): %s" %
-                                    in_msg)
-
-            return Message(ta_type, ta_id, msg_type, args, optargs)
-
-        except ValueError:
-            raise ProtocolError("Error JSON decoding incoming message")
-
-    def __init__(self, ta_type, ta_id, msg_type, args, optargs):
-        self.ta_type = ta_type
-        self.ta_id = ta_id
-        self.msg_type = msg_type
-        self.args = args
-        self.optargs = optargs
-
-    def cmd(self):
-        return self.ta_type.cmd
-
-    def is_request(self):
-        return self.msg_type == proto.MSG_TYPE_REQUEST
-
-    def is_accept(self):
-        return self.msg_type == proto.MSG_TYPE_ACCEPT
-
-    def is_notify(self):
-        return self.msg_type == proto.MSG_TYPE_NOTIFY
-
-    def is_inform(self):
-        return self.msg_type == proto.MSG_TYPE_INFORM
-
-    def is_complete(self):
-        return self.msg_type == proto.MSG_TYPE_COMPLETE
-
-    def is_fail(self):
-        return self.msg_type == proto.MSG_TYPE_FAIL
-
-    def is_server_generated(self):
-        return self.msg_type in proto.SERVER_GENERATED_MSG_TYPES
-
-    def is_client_generated(self):
-        return self.msg_type in proto.CLIENT_GENERATED_MSG_TYPES
-
-    def to_wire(self):
-        out_msg = {}
-
-        fields = self.ta_type.fields[self.msg_type]
-        opt_fields = self.ta_type.opt_fields[self.msg_type]
-
-        proto.FIELD_TA_CMD.put(self.ta_type.cmd, out_msg)
-        proto.FIELD_TA_ID.put(self.ta_id, out_msg)
-        proto.FIELD_MSG_TYPE.put(self.msg_type, out_msg)
-
-        assert len(self.args) == len(fields)
-
-        for i, field in enumerate(fields):
-            field.put(self.args[i], out_msg)
-
-        optargs = self.optargs.copy()
-        for opt_field in opt_fields:
-            opt_name = opt_field.python_name()
-            if opt_name in optargs:
-                opt_value = optargs.get(opt_name)
-                if opt_value is not None:
-                    opt_field.put(opt_value, out_msg)
-                del optargs[opt_name]
-        assert len(optargs) == 0
-
-        out_wire_msg = json.dumps(out_msg).encode('utf-8')
-        return out_wire_msg
 
 
 class TransactionState(Enum):
