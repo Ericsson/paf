@@ -4,6 +4,7 @@
 
 import contextlib
 import enum
+import random
 import time
 
 
@@ -289,6 +290,7 @@ def assure_not_connected(fun):
 
 
 WARNING_THRESHOLD = 0.5
+WARNING_JITTER = 0.1
 MIN_IDLE_TIME = 4
 
 
@@ -296,6 +298,11 @@ class IdleState(enum.Enum):
     ACTIVE = enum.auto()
     TENTATIVE = enum.auto()
     TIMED_OUT = enum.auto()
+
+
+def jitter(base, max_jitter):
+    k = 1.0 + (random.random() - 0.5) * 2 * max_jitter
+    return k * base
 
 
 class Connection:
@@ -393,7 +400,9 @@ class Connection:
             return t
 
     def install_idle_warning_timer(self):
-        self.install_idle_timer(WARNING_THRESHOLD * self.idle_time())
+        warning_time = jitter(WARNING_THRESHOLD * self.idle_time(),
+                              WARNING_JITTER)
+        self.install_idle_timer(warning_time)
 
     def install_idle_timeout_timer(self):
         self.install_idle_timer((1 - WARNING_THRESHOLD) * self.idle_time())

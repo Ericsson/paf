@@ -738,7 +738,7 @@ def test_server_tracking_client(impatient_server):
     wait(conn, criteria=lambda: track_recorder.count_notifications() > 0)
 
     latency = time.time() - start
-    assert latency > query_time
+    assert latency > (query_time - 0.5)
     assert latency < (query_time + 0.5)
 
     notifications = track_recorder.get_notifications()
