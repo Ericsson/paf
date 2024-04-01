@@ -140,6 +140,11 @@ the *name* key. This domain name is only used for logging and
 documentation and is not seen in the by clients to the Pathfinder
 server.
 
+The default max client idle time (in seconds) may by configured by
+adding a *max_idle_time* key to the domain dictionary. The default is
+30 seconds. The actual maximum idle time may be lower (e.g., if a
+client has published services with a low time-to-live [TTL]).
+
 Each element of the *sockets* list is a socket. A socket is either the
 address in the form of a string (in XCM format), or a dictionary,
 where the address must be the value of the key *addr*.
