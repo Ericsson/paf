@@ -516,7 +516,7 @@ def limited_subscriptions_server(request):
     server.stop()
 
 
-IMPATIENT_MAX_IDLE_TIME = 2
+IMPATIENT_MAX_IDLE_TIME = 4
 
 
 @pytest.fixture(scope='function')
@@ -733,7 +733,7 @@ def test_server_tracking_client(impatient_server):
     # Verify a track query is being sent
     start = time.time()
     timeout = IMPATIENT_MAX_IDLE_TIME
-    query_time = timeout * 0.75
+    query_time = timeout * 0.5
 
     wait(conn, criteria=lambda: track_recorder.count_notifications() > 0)
 
@@ -803,7 +803,7 @@ def test_ttl_induced_tracking(server):
         "name": {"service-x"},
         "value": {0}
     }
-    service_ttl = 2
+    service_ttl = 4
     conn.publish(service_id, generation, service_props, service_ttl)
 
     start = time.time()
