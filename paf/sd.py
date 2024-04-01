@@ -288,8 +288,8 @@ def assure_not_connected(fun):
     return assure_state(fun, False)
 
 
-WARNING_THRESHOLD = 0.75
-MIN_IDLE_TIME = 2
+WARNING_THRESHOLD = 0.5
+MIN_IDLE_TIME = 4
 
 
 class IdleState(enum.Enum):
