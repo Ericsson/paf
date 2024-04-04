@@ -690,7 +690,7 @@ if __name__ == '__main__':
                       "was index specified." % args[0])
                 sys.exit(1)
 
-            server = args[0]
+            server = client.ServerConf(args[0])
         else:
             if server_num is None:
                 server = servers[0]
