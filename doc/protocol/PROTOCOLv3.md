@@ -1173,6 +1173,7 @@ Field Name | Value Type | Mandatory | Description
 `client-addr` | String | Yes | Source address of the client's transport connection.
 `time` | Int>=0 | Yes | Client transport connection establishment time, expressed in seconds since the UNIX epoch, in UTC.
 `idle` | Number>=0 | Yes | The time in seconds since last the client was heard from.
+`protocol-version` | Int>=0 | Yes | The Pathfinder protocol version used on the client's connection.
 `latency` | Number>=0 | No | The client track query response time latency (including network delay) in seconds.
 
 #### Clients Complete
