@@ -152,6 +152,27 @@ class ResourceManager:
             raise e
 
 
+MIN_IDLE_MIN = 1
+
+
+class IdleLimit:
+    def __init__(self, idle_min, idle_max):
+        if idle_min < MIN_IDLE_MIN:
+            raise ValueError("Lower bound for max idle time must be set "
+                             ">= %d" % MIN_IDLE_MIN)
+        if idle_min > idle_max:
+            raise ValueError("Max idle time lower bound must be equal to "
+                             "or lower than the upper bound")
+        self.idle_min = idle_min
+        self.idle_max = idle_max
+
+    def limit(self, value):
+        return min(self.idle_max, max(self.idle_min, value))
+
+    def idle_default(self):
+        return self.idle_max
+
+
 class Subscription:
     def __init__(self, sub_id, filter, client_id, user_id, match_cb):
         self.sub_id = sub_id
@@ -291,7 +312,6 @@ def assure_not_connected(fun):
 
 WARNING_THRESHOLD = 0.5
 WARNING_JITTER = 0.1
-MIN_IDLE_TIME = 4
 
 
 class IdleState(enum.Enum):
@@ -306,10 +326,10 @@ def jitter(base, max_jitter):
 
 
 class Connection:
-    def __init__(self, client, timer_manager, max_idle_time, idle_cb):
+    def __init__(self, client, timer_manager, idle_limit, idle_cb):
         self.client = client
         self.timer_manager = timer_manager
-        self.max_idle_time = max_idle_time
+        self.idle_limit = idle_limit
         self.idle_cb = idle_cb
         self.subscriptions = {}
         self.services = {}
@@ -318,7 +338,7 @@ class Connection:
         self.idle_state = IdleState.ACTIVE
         self.idle_timer = None
         self.last_seen = time.time()
-        if max_idle_time is not None:
+        if idle_limit is not None:
             self.install_idle_warning_timer()
 
     def client_id(self):
@@ -374,38 +394,37 @@ class Connection:
         if self.idle_state != IdleState.TIMED_OUT:
             self.idle_state = IdleState.ACTIVE
 
-            if self.max_idle_time is not None:
+            if self.idle_limit is not None:
                 self.install_idle_warning_timer()
 
         self.last_seen = time.time()
 
     def check_idle(self):
-        assert self.max_idle_time is not None
+        assert self.idle_limit is not None
 
         if self.idle_state == IdleState.ACTIVE:
             self.issue_idle_warning()
 
     def install_idle_timer(self, t):
-        assert self.max_idle_time is not None
+        assert self.idle_limit is not None
         self.uninstall_idle_timer()
         self.idle_timer = \
             self.timer_manager.add(self.idle_timer_fired, t, relative=True)
 
-    def idle_time(self):
-        if self.max_idle_time is not None:
-            t = self.max_idle_time
+    def max_idle_time(self):
+        if self.idle_limit is not None:
             if len(self.services) > 0:
-                t = min(t, self.get_lowest_ttl())
-            t = max(t, MIN_IDLE_TIME)
-            return t
+                return self.idle_limit.limit(self.get_lowest_ttl())
+            else:
+                return self.idle_limit.idle_default()
 
     def install_idle_warning_timer(self):
-        warning_time = jitter(WARNING_THRESHOLD * self.idle_time(),
+        warning_time = jitter(WARNING_THRESHOLD * self.max_idle_time(),
                               WARNING_JITTER)
         self.install_idle_timer(warning_time)
 
     def install_idle_timeout_timer(self):
-        self.install_idle_timer((1 - WARNING_THRESHOLD) * self.idle_time())
+        self.install_idle_timer((1 - WARNING_THRESHOLD) * self.max_idle_time())
 
     def uninstall_idle_timer(self):
         if self.idle_timer is not None:
@@ -507,7 +526,7 @@ class Client:
                 return False
         return True
 
-    def connect(self, user_id, max_idle_time, conn_idle_cb):
+    def connect(self, user_id, idle_limit, conn_idle_cb):
         if self.is_connected():
             # The active connection may be down but this has not yet
             # noticed by the server.
@@ -522,7 +541,7 @@ class Client:
         self.db.add_client(self)
 
         self.active_connection = \
-            Connection(self, self.timer_manager, max_idle_time, conn_idle_cb)
+            Connection(self, self.timer_manager, idle_limit, conn_idle_cb)
 
     @assure_connected
     def disconnect(self):
@@ -737,15 +756,14 @@ class ServiceDiscovery:
         self.db = DB()
         self.orphan_timers = {}
 
-    def client_connect(self, client_id, user_id, max_idle_time,
-                       conn_idle_cb):
+    def client_connect(self, client_id, user_id, idle_limit, conn_idle_cb):
         client = self.db.get_client(client_id)
 
         if client is None:
             client = Client(client_id, user_id, self.db, self.resource_manager,
                             self.timer_manager)
 
-        client.connect(user_id, max_idle_time, conn_idle_cb)
+        client.connect(user_id, idle_limit, conn_idle_cb)
 
     def client_disconnect(self, client_id):
         client = self._get_connected_client(client_id)

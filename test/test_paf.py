@@ -109,10 +109,11 @@ CONFIG_FILE = 'pafd-test.conf'
 
 
 class Domain:
-    def __init__(self, name, addrs, max_idle_time):
+    def __init__(self, name, addrs, idle_min, idle_max):
         self.name = name
         self.addrs = addrs
-        self.max_idle_time = max_idle_time
+        self.idle_min = idle_min
+        self.idle_max = idle_max
         self.file = "%s/%s" % (DOMAINS_DIR, self.name)
         self.set_mapped_addr(self.default_addr())
 
@@ -165,14 +166,14 @@ class BaseServer:
     def default_domain(self):
         return self.domains[0]
 
-    def configure_domain(self, name, addrs, max_idle_time=None):
+    def configure_domain(self, name, addrs, idle_min=None, idle_max=None):
         if isinstance(addrs, str):
             addrs = [addrs]
 
-        if max_idle_time is not None:
+        if idle_max is not None or idle_min is not None:
             self.use_config_file = True
 
-        domain = Domain(name, addrs, max_idle_time)
+        domain = Domain(name, addrs, idle_min, idle_max)
         self.domains.append(domain)
         return domain
 
@@ -250,8 +251,17 @@ class BaseServer:
             if random_bool():
                 domain_conf["name"] = "domain-%d" % random.randint(0, 10000)
 
-            if domain.max_idle_time is not None:
-                domain_conf["max_idle_time"] = domain.max_idle_time
+            if domain.idle_min is not None or domain.idle_max is not None:
+                if random_bool() and domain.idle_min is None:
+                    domain_conf["max_idle_time"] = domain.idle_max
+                else:
+                    idle = {
+                    }
+                    if domain.idle_min is not None:
+                        idle["min"] = domain.idle_min
+                    if domain.idle_min is not None:
+                        idle["max"] = domain.idle_max
+                    domain_conf["idle"] = idle
 
             domains_conf.append(domain_conf)
         conf["domains"] = domains_conf
@@ -516,7 +526,8 @@ def limited_subscriptions_server(request):
     server.stop()
 
 
-IMPATIENT_MAX_IDLE_TIME = 4
+IMPATIENT_IDLE_MIN = 2
+IMPATIENT_IDLE_MAX = 4
 
 
 @pytest.fixture(scope='function')
@@ -524,7 +535,8 @@ def impatient_server(request):
     server = server_by_request(request)
     if not server.supports(ServerFeature.PROTO_V3):
         pytest.skip("Server does not support protocol version 3")
-    server.configure_random_domain(1, max_idle_time=IMPATIENT_MAX_IDLE_TIME)
+    server.configure_random_domain(1, idle_min=IMPATIENT_IDLE_MIN,
+                                   idle_max=IMPATIENT_IDLE_MAX)
     server.start()
     yield server
     server.stop()
@@ -732,7 +744,7 @@ def test_server_tracking_client(impatient_server):
 
     # Verify a track query is being sent
     start = time.time()
-    timeout = IMPATIENT_MAX_IDLE_TIME
+    timeout = IMPATIENT_IDLE_MAX
     query_time = timeout * 0.5
 
     wait(conn, criteria=lambda: track_recorder.count_notifications() > 0)
@@ -777,7 +789,7 @@ def test_client_activity_avoids_track_queries(impatient_server):
     wait(conn, criteria=track_recorder.accepted)
 
     iter = 10
-    timeout = (IMPATIENT_MAX_IDLE_TIME + 1) / iter
+    timeout = (IMPATIENT_IDLE_MAX + 1) / iter
     for _ in range(iter):
         wait(conn, timeout=timeout)
         conn.ping()

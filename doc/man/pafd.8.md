@@ -140,10 +140,18 @@ the *name* key. This domain name is only used for logging and
 documentation and is not seen in the by clients to the Pathfinder
 server.
 
-The default max client idle time (in seconds) may by configured by
-adding a *max_idle_time* key to the domain dictionary. The default is
-30 seconds. The actual maximum idle time may be lower (e.g., if a
-client has published services with a low time-to-live [TTL]).
+The max idle time for Pathfinder Protocol v3 clients may be controlled
+on a per-domain basis by configuring a dictionary *idle* with
+either/both of the *max* and *min* keys.
+
+*max* represents an upper bound for the maximum idle time (in seconds)
+that will ever be employed for any client. This maximum value is also
+used as the initial value for clients connecting to that domain. The
+actual maximum idle time may be lower (e.g., if a client has published
+services with a low time-to-live [TTL]). *max* default is 30 seconds.
+
+*min* represents a lower bound for the maximum idle time.  The default
+value is 4 seconds. *min* may not be set lower than 1 second.
 
 Each element of the *sockets* list is a socket. A socket is either the
 address in the form of a string (in XCM format), or a dictionary,
@@ -176,10 +184,14 @@ command-line options for details.
 Configuration file example:
 
     domains:
-    - addrs: # Domain which may be access via two server sockets
+    - name: domain0
+      addrs: # Domain which may be access via two server sockets
       - tls:*:4711
       - ux:local
-    - addrs: # Second domain, only available at one socket
+    - name: domain1
+      idle:
+	max: 15
+      addrs: # Second domain, only available at one socket
       - tls:192.168.1.59:5711
 
     resources:

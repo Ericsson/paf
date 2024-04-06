@@ -144,7 +144,7 @@ SOFT_OUT_WIRE_LIMIT = 128
 
 class Connection:
     def __init__(self, sd, conn_sock, event_loop, server, handshake_cb,
-                 max_idle_time, idle_cb, term_cb):
+                 idle_limit, idle_cb, term_cb):
         self.client_id = None
         self.proto_version = None
         self.conn_addr = conn_sock.get_attr("xcm.remote_addr")
@@ -155,7 +155,7 @@ class Connection:
         self.event_loop = event_loop
         self.server = server
         self.handshake_cb = handshake_cb
-        self.max_idle_time = max_idle_time
+        self.idle_limit = idle_limit
         self.idle_cb = idle_cb
         self.term_cb = term_cb
         self.update_source()
@@ -344,22 +344,22 @@ class Connection:
         if self.proto_version is not None:
             try:
                 if self.proto_version >= 3:
-                    max_idle_time = self.max_idle_time
+                    idle_limit = self.idle_limit
                 else:
-                    max_idle_time = None
+                    idle_limit = None
 
                 self.sd.client_connect(self.client_id, user_id,
-                                       max_idle_time, self.idle_cb)
+                                       self.idle_limit, self.idle_cb)
 
                 self.debug("Handshake producedure finished for client from "
                            "\"%s\"." % self.conn_addr, LogCategory.PROTOCOL)
                 self.debug("Protocol version %d is selected." %
                            self.proto_version, LogCategory.PROTOCOL)
 
-                if max_idle_time is not None:
+                if idle_limit is not None:
                     self.debug("Initial max idle time is %d s." %
-                               max_idle_time, LogCategory.PROTOCOL)
-                self.max_idle_time = max_idle_time
+                               idle_limit.idle_default(), LogCategory.PROTOCOL)
+                    self.idle_limit = idle_limit
 
                 self.handshaked = True
                 self.handshake_cb(self)
@@ -594,7 +594,7 @@ class Connection:
         extended = self.proto_version >= 3
 
         for conn in self.server.client_connections.values():
-            idle = now - self.sd.client_last_seen(conn.client_id)
+            idle_time = now - self.sd.client_last_seen(conn.client_id)
 
             optargs = {}
             if conn.is_tracked():
@@ -602,7 +602,7 @@ class Connection:
 
             if extended:
                 yield ta.notify(conn.client_id, conn.conn_addr,
-                                int(conn.connect_time), idle,
+                                int(conn.connect_time), idle_time,
                                 conn.proto_version, **optargs)
             else:
                 yield ta.notify(conn.client_id, conn.conn_addr,
@@ -691,11 +691,11 @@ PAF_TO_XCM_SOCKET_ATTRS = {
 
 class Server:
     def __init__(self, name, sockets, max_user_resources, max_total_resources,
-                 max_idle_time, event_loop):
+                 idle_limit, event_loop):
         self.timer_manager = paf.timer.TimerManager(self.timer_changed)
         self.sd = sd.ServiceDiscovery(name, self.timer_manager,
                                       max_user_resources, max_total_resources)
-        self.max_idle_time = max_idle_time
+        self.idle_limit = idle_limit
         self.event_loop = event_loop
         self.server_socks = {}
         for socket in sockets:
@@ -803,7 +803,7 @@ class Server:
                         self.update_source(source)
                         conn = Connection(self.sd, conn_sock, self.event_loop,
                                           self, self.conn_handshake_completed,
-                                          self.max_idle_time, self.client_idle,
+                                          self.idle_limit, self.client_idle,
                                           self.conn_terminated)
                         self.clientless_connections.add(conn)
                         self.schedule_clean_out()
@@ -875,6 +875,6 @@ class Server:
 
 
 def create(name, sockets, max_user_resources, max_total_resources,
-           max_idle_time, event_loop):
+           idle_limit, event_loop):
     return Server(name, sockets, max_user_resources, max_total_resources,
-                  max_idle_time, event_loop)
+                  idle_limit, event_loop)

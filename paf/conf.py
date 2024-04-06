@@ -12,7 +12,8 @@ DEFAULT_LOG_FILE_MAX_SIZE = 1000000
 DEFAULT_LOG_SYSLOG = True
 DEFAULT_LOG_FACILITY = logging.handlers.SysLogHandler.LOG_DAEMON
 DEFAULT_LOG_FILTER = logging.INFO
-DEFAULT_MAX_IDLE_TIME = 30
+DEFAULT_IDLE_MIN = 4
+DEFAULT_IDLE_MAX = 30
 
 
 class Error(Exception):
@@ -24,6 +25,12 @@ class MissingFieldError(Error):
     def __init__(self, dict_path, dict_key):
         Error.__init__(self, "required parameter '%s' is missing" %
                        path(dict_path, dict_key))
+
+
+class DuplicateFieldError(Error):
+    def __init__(self, dict_path, dict_key):
+        Error.__init__(self, "parameter '%s' was used in combination "
+                       "with one of its aliases" % path(dict_path, dict_key))
 
 
 class FormatError(Error):
@@ -185,9 +192,9 @@ class SocketConf:
 
 
 class DomainConf:
-    def __init__(self, name, max_idle_time):
+    def __init__(self, name, idle_limit):
         self.name = name
-        self.max_idle_time = max_idle_time
+        self.idle_limit = idle_limit
         self.sockets = []
 
     def add_socket(self, addr, tls_attrs={}):
@@ -195,11 +202,16 @@ class DomainConf:
 
     def __str__(self):
         s = {}
+
         if self.name is not None:
             s["name"] = self.name
+
         s["sockets"] = self.sockets
 
-        s["max_idle_time"] = self.max_idle_time
+        s["idle"] = {
+            "min": self.idle_limit.idle_min,
+            "max": self.idle_limit.idle_max
+        }
 
         return str(s)
 
@@ -210,8 +222,10 @@ class Conf:
         self.domains = []
         self.resources = ResourcesConf()
 
-    def add_domain(self, name=None, max_idle_time=DEFAULT_MAX_IDLE_TIME):
-        domain_conf = DomainConf(name, max_idle_time)
+    def add_domain(self, name=None,
+                   idle_limit=sd.IdleLimit(DEFAULT_IDLE_MIN,
+                                           DEFAULT_IDLE_MAX)):
+        domain_conf = DomainConf(name, idle_limit)
         self.domains.append(domain_conf)
         return domain_conf
 
@@ -241,9 +255,19 @@ def assure_type(value, value_type, path):
                     "'%s')" % (path, type(value), value_type))
 
 
-def dict_lookup(dict_value, dict_key, value_type, dict_path, required=False,
+def dict_lookup(dict_value, dict_keys, value_type, dict_path, required=False,
                 default=None):
-    value = dict_value.get(dict_key)
+    if (isinstance(dict_keys, str)):
+        dict_keys = [dict_keys]
+
+    value = None
+
+    for dict_key in dict_keys:
+        if dict_key in dict_value:
+            if value is not None:
+                raise DuplicateFieldError(dict_path, dict_key)
+            value = dict_value.get(dict_key)
+
     if value is None:
         if required:
             assert default is None
@@ -291,20 +315,33 @@ def domains_populate(conf, domains, path):
 
         name = dict_lookup(domain, "name", str, domain_path, required=False)
 
-        max_idle_time = dict_lookup(domain, "max_idle_time", int,
-                                    domain_path, default=DEFAULT_MAX_IDLE_TIME,
-                                    required=False)
+        idle_min = DEFAULT_IDLE_MIN
 
-        # 'addrs' is an alternative name, supported for backward
-        # compatibility reasons
-        sockets = dict_lookup(domain, "addrs", list, domain_path,
-                              required=False)
+        # 'max_idle_time' is a legacy name for 'idle_max'
+        idle_max = dict_lookup(domain, "max_idle_time", int,
+                               domain_path, default=DEFAULT_IDLE_MAX,
+                               required=False)
 
-        if sockets is None:
-            sockets = dict_lookup(domain, "sockets", list, domain_path,
-                                  required=True)
+        idle = domain.get("idle")
+        if idle is not None:
+            idle_path = "%s.idle" % domain_path
 
-        domain_conf = conf.add_domain(name, max_idle_time)
+            idle_min = dict_lookup(idle, "min", int, idle_path,
+                                   default=DEFAULT_IDLE_MIN, required=False)
+
+            if "max_idle_time" in domain and "max" in idle:
+                raise DuplicateFieldError(domain_path, "max_idle_time")
+
+            idle_max = dict_lookup(idle, "max", int, idle_path,
+                                   default=DEFAULT_IDLE_MAX, required=False)
+
+        # 'addrs' is a legacy name for 'sockets'
+        sockets = dict_lookup(domain, ["sockets", "addrs"], list, domain_path,
+                              required=True)
+
+        idle_limit = sd.IdleLimit(idle_min, idle_max)
+
+        domain_conf = conf.add_domain(name, idle_limit)
 
         for socket_num, socket in enumerate(sockets):
             socket_path = "%s.sockets[%d]" % (domain_path, socket_num)

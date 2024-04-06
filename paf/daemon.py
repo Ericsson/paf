@@ -80,7 +80,7 @@ def run(conf, hook=None):
             user = conf.resources.user.resources
             total = conf.resources.total.resources
             server = paf.server.create(domain.name, domain.sockets, user,
-                                       total, domain.max_idle_time, event_loop)
+                                       total, domain.idle_limit, event_loop)
             servers.append(server)
 
         if hook is not None:
