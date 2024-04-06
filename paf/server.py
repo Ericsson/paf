@@ -725,7 +725,7 @@ class Server:
 
     def debug(self, msg, category):
         if self.sd.name is not None:
-            prefix = "%s: "
+            prefix = "%s: " % self.sd.name
         else:
             prefix = ""
         debug("%s%s" % (prefix, msg), category)
