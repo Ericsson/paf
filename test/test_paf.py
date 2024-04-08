@@ -109,9 +109,12 @@ CONFIG_FILE = 'pafd-test.conf'
 
 
 class Domain:
-    def __init__(self, name, addrs, idle_min, idle_max):
+    def __init__(self, name, addrs, proto_version_min, proto_version_max,
+                 idle_min, idle_max):
         self.name = name
         self.addrs = addrs
+        self.proto_version_min = proto_version_min
+        self.proto_version_max = proto_version_max
         self.idle_min = idle_min
         self.idle_max = idle_max
         self.file = "%s/%s" % (DOMAINS_DIR, self.name)
@@ -166,14 +169,18 @@ class BaseServer:
     def default_domain(self):
         return self.domains[0]
 
-    def configure_domain(self, name, addrs, idle_min=None, idle_max=None):
+    def configure_domain(self, name, addrs, proto_version_min=None,
+                         proto_version_max=None, idle_min=None,
+                         idle_max=None):
         if isinstance(addrs, str):
             addrs = [addrs]
 
-        if idle_max is not None or idle_min is not None:
+        if proto_version_min is not None or proto_version_max is not None or \
+           idle_max is not None or idle_min is not None:
             self.use_config_file = True
 
-        domain = Domain(name, addrs, idle_min, idle_max)
+        domain = Domain(name, addrs, proto_version_min, proto_version_max,
+                        idle_min, idle_max)
         self.domains.append(domain)
         return domain
 
@@ -250,6 +257,15 @@ class BaseServer:
 
             if random_bool():
                 domain_conf["name"] = "domain-%d" % random.randint(0, 10000)
+
+            proto_version = {}
+
+            if domain.proto_version_min is not None:
+                proto_version["min"] = domain.proto_version_min
+            if domain.proto_version_max is not None:
+                proto_version["max"] = domain.proto_version_max
+            if len(proto_version) > 0:
+                domain_conf["protocol_version"] = proto_version
 
             if domain.idle_min is not None or domain.idle_max is not None:
                 if random_bool() and domain.idle_min is None:
@@ -542,6 +558,35 @@ def impatient_server(request):
     server.stop()
 
 
+def vn_only_server(request, proto_version):
+    server = server_by_request(request)
+    if server.supports(ServerFeature.PROTO_V3):
+        server.configure_random_domain(1, proto_version_min=proto_version,
+                                       proto_version_max=proto_version)
+    else:
+        if proto_version == 3:
+            pytest.skip("Server does not support protocol version 3")
+        server.configure_random_domain(1)
+
+    return server
+
+
+@pytest.fixture(scope='function')
+def v2_only_server(request):
+    server = vn_only_server(request, 2)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture(scope='function')
+def v3_only_server(request):
+    server = vn_only_server(request, 3)
+    server.start()
+    yield server
+    server.stop()
+
+
 def set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -714,22 +759,42 @@ def test_hello(server):
     assert conn.proto_version == proto.MAX_VERSION
 
 
-def run_hello_vn_only(server, proto_version):
+def client_connect(server, proto_version):
     conf = client.ServerConf(server.random_domain().random_addr(),
                              proto_version_min=proto_version,
                              proto_version_max=proto_version)
     conn = client.connect(conf)
     assert conn.proto_version == proto_version
 
-
-@pytest.mark.fast
-def test_hello_v2_only(server):
-    run_hello_vn_only(server, 2)
+    return conn
 
 
 @pytest.mark.fast
-def test_hello_v3_only(v3_server):
-    run_hello_vn_only(v3_server, 3)
+def test_hello_client_v2_only(server):
+    client_connect(server, 2)
+
+
+@pytest.mark.fast
+def test_hello_client_v3_only(v3_server):
+    client_connect(v3_server, 3)
+
+
+@pytest.mark.fast
+def test_server_force_v2(v2_only_server):
+    client_connect(v2_only_server, 2)
+
+    with pytest.raises(client.ProtocolError,
+                       match=".*unsupported-protocol-version.*"):
+        client_connect(v2_only_server, 3)
+
+
+@pytest.mark.fast
+def test_server_force_v3(v3_only_server):
+    client_connect(v3_only_server, 3)
+
+    with pytest.raises(client.ProtocolError,
+                       match=".*unsupported-protocol-version.*"):
+        client_connect(v3_only_server, 2)
 
 
 def test_server_tracking_client(impatient_server):

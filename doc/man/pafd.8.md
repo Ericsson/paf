@@ -140,6 +140,18 @@ the *name* key. This domain name is only used for logging and
 documentation and is not seen in the by clients to the Pathfinder
 server.
 
+The range of allowed Pathfinder protocol versions for clients
+connecting to a particular domain may be administratively limited
+(beyond what the server supports) by providing a per-domain
+*protocol_version* dictionary, with either/both of the *max* and *min*
+keys.
+
+*max* represents an upper bound for the Pathfinder protocol version
+used. Must be an integer <= 3.
+
+*min* represents a lower bound for the Pathfinder protocol version
+used. Must be an integer >= 2.
+
 The max idle time for Pathfinder Protocol v3 clients may be controlled
 on a per-domain basis by configuring a dictionary *idle* with
 either/both of the *max* and *min* keys.

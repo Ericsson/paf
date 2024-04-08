@@ -4,6 +4,7 @@
 import logging
 
 import paf.sd as sd
+import paf.proto as proto
 
 DEFAULT_LOG_CONSOLE = False
 DEFAULT_LOG_FILE = None
@@ -191,9 +192,37 @@ class SocketConf:
         return str(self)
 
 
+class ProtoVersionLimitConf:
+    def __init__(self, version_min=proto.MIN_VERSION,
+                 version_max=proto.MAX_VERSION):
+        if version_min > version_max:
+            raise Error("minimum protocol version must be equal or less "
+                        "than the maximum")
+        if version_max > proto.MAX_VERSION:
+            raise Error("configured maximum protocol version (%d) is higher "
+                        "than the highest supported version (%d)" %
+                        (version_max, proto.MAX_VERSION))
+        if version_min < proto.MIN_VERSION:
+            raise Error("configured minimum protocol version (%d) is lower "
+                        "than the lowest supported version (%d)" %
+                        (version_min, proto.MIN_VERSION))
+        self.version_min = version_min
+        self.version_max = version_max
+
+    def get_highest_allowed(self, client_version_min, client_version_max):
+        max_version = min(client_version_max, self.version_max)
+        min_version = max(client_version_min, self.version_min)
+
+        if min_version <= max_version:
+            return max_version
+        else:
+            return None
+
+
 class DomainConf:
-    def __init__(self, name, idle_limit):
+    def __init__(self, name, proto_version_limit, idle_limit):
         self.name = name
+        self.proto_version_limit = proto_version_limit
         self.idle_limit = idle_limit
         self.sockets = []
 
@@ -207,6 +236,11 @@ class DomainConf:
             s["name"] = self.name
 
         s["sockets"] = self.sockets
+
+        s["protocol_version"] = {
+            "min": self.proto_version_limit.version_min,
+            "max": self.proto_version_limit.version_max
+        }
 
         s["idle"] = {
             "min": self.idle_limit.idle_min,
@@ -223,9 +257,10 @@ class Conf:
         self.resources = ResourcesConf()
 
     def add_domain(self, name=None,
+                   proto_version_limit=ProtoVersionLimitConf(),
                    idle_limit=sd.IdleLimit(DEFAULT_IDLE_MIN,
                                            DEFAULT_IDLE_MAX)):
-        domain_conf = DomainConf(name, idle_limit)
+        domain_conf = DomainConf(name, proto_version_limit, idle_limit)
         self.domains.append(domain_conf)
         return domain_conf
 
@@ -315,6 +350,21 @@ def domains_populate(conf, domains, path):
 
         name = dict_lookup(domain, "name", str, domain_path, required=False)
 
+        version_min = proto.MIN_VERSION
+        version_max = proto.MAX_VERSION
+
+        version = domain.get("protocol_version")
+        if version is not None:
+            version_path = "%s.protocol_version" % domain_path
+
+            version_min = dict_lookup(version, "min", int, version_path,
+                                      default=version_min, required=False)
+
+            version_max = dict_lookup(version, "max", int, version_path,
+                                      default=version_max, required=False)
+
+        proto_version_limit = ProtoVersionLimitConf(version_min, version_max)
+
         idle_min = DEFAULT_IDLE_MIN
 
         # 'max_idle_time' is a legacy name for 'idle_max'
@@ -335,13 +385,13 @@ def domains_populate(conf, domains, path):
             idle_max = dict_lookup(idle, "max", int, idle_path,
                                    default=DEFAULT_IDLE_MAX, required=False)
 
+        idle_limit = sd.IdleLimit(idle_min, idle_max)
+
         # 'addrs' is a legacy name for 'sockets'
         sockets = dict_lookup(domain, ["sockets", "addrs"], list, domain_path,
                               required=True)
 
-        idle_limit = sd.IdleLimit(idle_min, idle_max)
-
-        domain_conf = conf.add_domain(name, idle_limit)
+        domain_conf = conf.add_domain(name, proto_version_limit, idle_limit)
 
         for socket_num, socket in enumerate(sockets):
             socket_path = "%s.sockets[%d]" % (domain_path, socket_num)

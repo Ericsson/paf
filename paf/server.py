@@ -144,7 +144,7 @@ SOFT_OUT_WIRE_LIMIT = 128
 
 class Connection:
     def __init__(self, sd, conn_sock, event_loop, server, handshake_cb,
-                 idle_limit, idle_cb, term_cb):
+                 proto_version_limit, idle_limit, idle_cb, term_cb):
         self.client_id = None
         self.proto_version = None
         self.conn_addr = conn_sock.get_attr("xcm.remote_addr")
@@ -155,6 +155,7 @@ class Connection:
         self.event_loop = event_loop
         self.server = server
         self.handshake_cb = handshake_cb
+        self.proto_version_limit = proto_version_limit
         self.idle_limit = idle_limit
         self.idle_cb = idle_cb
         self.term_cb = term_cb
@@ -339,7 +340,8 @@ class Connection:
         self.info("User id is \"%s\"." % user_id, LogCategory.SECURITY)
 
         self.proto_version = \
-            self.server.select_proto_version(min_version, max_version)
+            self.proto_version_limit.get_highest_allowed(min_version,
+                                                         max_version)
 
         if self.proto_version is not None:
             try:
@@ -691,10 +693,11 @@ PAF_TO_XCM_SOCKET_ATTRS = {
 
 class Server:
     def __init__(self, name, sockets, max_user_resources, max_total_resources,
-                 idle_limit, event_loop):
+                 proto_version_limit, idle_limit, event_loop):
         self.timer_manager = paf.timer.TimerManager(self.timer_changed)
         self.sd = sd.ServiceDiscovery(name, self.timer_manager,
                                       max_user_resources, max_total_resources)
+        self.proto_version_limit = proto_version_limit
         self.idle_limit = idle_limit
         self.event_loop = event_loop
         self.server_socks = {}
@@ -729,14 +732,6 @@ class Server:
         else:
             prefix = ""
         debug("%s%s" % (prefix, msg), category)
-
-    def select_proto_version(self, client_min_version, client_max_version):
-        candidate = min(client_max_version, proto.MAX_VERSION)
-
-        if candidate < proto.MIN_VERSION or candidate < client_min_version:
-            return None
-
-        return candidate
 
     def num_connections(self):
         return len(self.clientless_connections) + len(self.client_connections)
@@ -803,6 +798,7 @@ class Server:
                         self.update_source(source)
                         conn = Connection(self.sd, conn_sock, self.event_loop,
                                           self, self.conn_handshake_completed,
+                                          self.proto_version_limit,
                                           self.idle_limit, self.client_idle,
                                           self.conn_terminated)
                         self.clientless_connections.add(conn)
@@ -875,6 +871,6 @@ class Server:
 
 
 def create(name, sockets, max_user_resources, max_total_resources,
-           idle_limit, event_loop):
+           proto_version_limit, idle_limit, event_loop):
     return Server(name, sockets, max_user_resources, max_total_resources,
-                  idle_limit, event_loop)
+                  proto_version_limit, idle_limit, event_loop)
