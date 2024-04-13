@@ -24,7 +24,7 @@ originating client, and server state may thus be recreated, if needed.
 
 ## Document Version
 
-This is version 3.0.0-draft.2 of the Pathfinder protocol
+This is version 3.0.0-draft.3 of the Pathfinder protocol
 specification.
 
 ## Protocol Version
@@ -129,10 +129,10 @@ outdated service information.
 #### Owner
 
 The client publishing a service MUST become its owner. The ownership
-MUST be transferred, if the service is being republished by another
-client, with a different client identifier. The server MAY prohibit
-such operations (e.g., since it would constitute an access control
-violation).
+MUST be transferred, if the service is being republished or
+unpublished by another client, with a different client identifier. The
+server MAY prohibit such operations (e.g., since it would constitute
+an access control violation).
 
 An owner is identified by its client identifier.
 
@@ -234,7 +234,8 @@ service an orphan.
 
 The state transition from non-orphan to orphan, or vice versa, should
 be notified in all subscription transaction which have matched that
-service. Such notifications MAY be delayed.
+service. Such notifications MAY be delayed, but must precede any
+notification that the service was removed.
 
 After the service's TTL has expired, orphan services should be removed
 and the appropriate notifications sent in all subscription
@@ -754,6 +755,12 @@ be the service has been explicitly been unpublished, or that it became
 an orphan because the server lost contact with the owning client, and
 now the TTL has expired.
 
+In the latter case, the `disappeared` must have been preceded by an
+`appeared` or `modified` *without* an `orphan-since` field.
+
+In the former case, the `disappeared` must have been preceded by an
+`appeared` or `modified` *with* an `orphan-since` field.
+
 To limit the search scope, the client MAY supply a filter in the
 [filter string format](#filter-representation).
 
@@ -1050,6 +1057,10 @@ The `unpublish` command unpublishes a service.
 
 The server MUST allow the owning client and MAY allow a non-owner to
 unpublish a service.
+
+In case the client is not the owning client, or if the service is an
+orphan (regardless of owner), the unpublish is also an explicit
+republishing of the service.
 
 #### Unpublish Request
 

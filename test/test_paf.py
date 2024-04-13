@@ -1104,6 +1104,84 @@ def test_republish_same_generation_orphan_from_different_client_id(server):
     run_republish_orphan(domain_addr, new_generation=False)
 
 
+def run_unpublish_orphan(domain_addr, reused_client_id=None):
+    conn_pub0 = client.connect(domain_addr, client_id=reused_client_id)
+
+    service_id = conn_pub0.service_id()
+    generation = 1
+    service_props = {
+        "name": {"service-x"},
+        "value": {0}
+    }
+    service_ttl = 42
+
+    conn_pub0.publish(service_id, generation, service_props, service_ttl)
+
+    conn_sub = client.connect(domain_addr)
+    subscription_recorder = MultiResponseRecorder()
+    ta_id = conn_sub.subscribe(conn_sub.subscription_id(),
+                               subscription_recorder)
+    subscription_recorder.ta_id = ta_id
+    wait([conn_sub, conn_pub0], criteria=subscription_recorder.accepted)
+
+    wait([conn_sub, conn_pub0], criteria=lambda:
+         subscription_recorder.count_notifications() >= 1)
+    assert subscription_recorder.count_notifications() == 1
+
+    conn_pub0.close()
+
+    wait(conn_sub, criteria=lambda:
+         subscription_recorder.count_notifications() >= 2)
+
+    conn_pub1 = client.connect(domain_addr, client_id=reused_client_id)
+    conn_pub1.unpublish(service_id)
+
+    wait([conn_sub, conn_pub1], criteria=lambda:
+         subscription_recorder.count_notifications() >= 4)
+
+    notifications = subscription_recorder.get_notifications()
+    orphan_since = notifications[1][3]['orphan_since']
+
+    appeared = \
+        (client.EventType.NOTIFY, client.MATCH_TYPE_APPEARED, service_id,
+         {'generation': generation, 'service_props': service_props,
+          'ttl': service_ttl, 'client_id': conn_pub0.client_id})
+    orphanized = \
+        (client.EventType.NOTIFY, client.MATCH_TYPE_MODIFIED, service_id,
+         {'generation': generation, 'service_props': service_props,
+          'ttl': service_ttl, 'client_id': conn_pub0.client_id,
+          'orphan_since': orphan_since})
+    parented = \
+        (client.EventType.NOTIFY, client.MATCH_TYPE_MODIFIED, service_id,
+         {'generation': generation, 'service_props': service_props,
+          'ttl': service_ttl, 'client_id': conn_pub1.client_id})
+    disappeared = \
+        (client.EventType.NOTIFY, client.MATCH_TYPE_DISAPPEARED, service_id)
+
+    assert subscription_recorder.get_notifications() == \
+        [appeared, orphanized, parented, disappeared]
+
+    wait([conn_sub, conn_pub1], timeout=0.1)
+
+    assert subscription_recorder.count_notifications() == 4
+
+    conn_pub1.close()
+    conn_sub.close()
+
+
+@pytest.mark.fast
+def test_unpublish_orphan_from_same_client_id(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_unpublish_orphan(domain_addr, reused_client_id=client_id)
+
+
+@pytest.mark.fast
+def test_unpublish_orphan_from_different_client_id(server):
+    domain_addr = server.random_domain().random_addr()
+    run_unpublish_orphan(domain_addr)
+
+
 @pytest.mark.fast
 @pytest.mark.require_access_control
 def test_orphan_causes_rejection_of_client_with_new_user_id(tls_server):

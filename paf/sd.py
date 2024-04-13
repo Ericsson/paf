@@ -644,11 +644,17 @@ class Client:
 
         service.check_access(self.user_id)
 
-        # A non-owning client may unpublish a service
+        # A non-owning client may unpublish a service, in which case
+        # it first becomes the owner.
+        new_owner = service.client_id() != self.client_id
+        if new_owner or service.is_orphan():
+            if new_owner:
+                self.capture_service(service)
+            with service.modify() as change:
+                change.orphan_since = None
+                change.client_id = self.client_id
 
-        owner = self.db.get_client(service.client_id())
-
-        owner.remove_service(service)
+        self.remove_service(service)
 
         # give opportunity to recalcute idle timer based on changed TTL
         self.active()
