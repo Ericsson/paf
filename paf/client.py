@@ -270,7 +270,10 @@ class Client:
 
         self.proto_version_range = server_conf.proto_version_range()
 
-        self.track = track
+        if track:
+            self.tracker = Tracker(self)
+        else:
+            self.tracker = None
         self.ready_cb = ready_cb
         self.ta_id = 0
         self.out_wire_msgs = deque()
@@ -305,8 +308,7 @@ class Client:
                                        proto.MAX_VERSION))
             self.proto_version = selected_version
 
-            if self.track and self.proto_version >= 3:
-                self.tracker = Tracker()
+            if self.tracker is not None and self.proto_version >= 3:
                 self.tracker.ta_id = self.track(self.tracker)
 
             if self.ready_cb is not None:
