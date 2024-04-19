@@ -163,6 +163,20 @@ class BaseServer:
         else:
             return 200
 
+    def max_proto_version(self):
+        if self.supports(ServerFeature.PROTO_V3):
+            return 3
+        else:
+            return 2
+
+    def max_domain_proto_version(self, domain):
+        max_version = self.max_proto_version()
+
+        if domain.proto_version_max is not None:
+            max_version = min(max_version, domain.proto_version_max)
+
+        return max_version
+
     def random_domain(self):
         return random.choice(self.domains)
 
@@ -755,8 +769,9 @@ class MultiResponseRecorder(ResponseRecorderBase):
 
 @pytest.mark.fast
 def test_hello(server):
-    conn = client.connect(server.random_domain().random_addr())
-    assert conn.proto_version == proto.MAX_VERSION
+    domain = server.random_domain()
+    conn = client.connect(domain.random_addr())
+    assert conn.proto_version == server.max_domain_proto_version(domain)
 
 
 def client_connect(server, proto_version):
@@ -864,8 +879,8 @@ def test_client_activity_avoids_track_queries(impatient_server):
     conn.close()
 
 
-def test_ttl_induced_tracking(server):
-    conn = client.connect(server.random_domain().random_addr())
+def test_ttl_induced_tracking(v3_server):
+    conn = client.connect(v3_server.random_domain().random_addr())
 
     track_recorder = MultiResponseRecorder()
     ta_id = conn.track(track_recorder)
@@ -2421,8 +2436,8 @@ def test_list_clients_v2(server):
 
 
 @pytest.mark.fast
-def test_list_clients_v3(server):
-    run_list_clients(server, 3)
+def test_list_clients_v3(v3_server):
+    run_list_clients(v3_server, 3)
 
 
 @pytest.mark.fast
