@@ -543,7 +543,8 @@ class PafCli(cmd.Cmd):
         self.worker.cmd_clients()
 
     def do_publish(self, line):
-        """publish [<service-id>] <generation> <ttl> [<prop-name> <prop-value>] ...
+        """publish [<service-id>] <generation> <ttl> [<prop-name> \
+<prop-value>] ...
         Publish a new service, or republish a service with updated
         properties.
 

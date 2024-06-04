@@ -263,7 +263,7 @@ class Equal(Comparison):
     op = EQUAL
 
     def compare(self, value):
-        if type(value) == str:
+        if isinstance(value, str):
             return self.value == value
         else:
             return self.value == str(value)
@@ -276,7 +276,7 @@ class GreaterThan(Comparison):
     op = GREATER_THAN
 
     def compare(self, value):
-        return type(value) == int and value > self.value
+        return isinstance(value, int) and value > self.value
 
     def __init__(self, key, value):
         Comparison.__init__(self, key, value)
@@ -286,7 +286,7 @@ class LessThan(Comparison):
     op = LESS_THAN
 
     def compare(self, value):
-        return type(value) == int and value < self.value
+        return isinstance(value, int) and value < self.value
 
     def __init__(self, key, value):
         Comparison.__init__(self, key, value)
