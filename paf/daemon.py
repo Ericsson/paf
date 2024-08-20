@@ -168,8 +168,9 @@ def main(argv):
         elif opt == '-r':
             hook = optval
         elif opt == '-v':
-            print("Server version: %s" % paf.server.VERSION)
-            print("Protocol version(s): %d" % paf.proto.VERSION)
+            print(f"Server version: {paf.server.VERSION}")
+            versions = " ".join(map(str, paf.proto.VERSIONS))
+            print(f"Protocol version(s): {versions}")
             sys.exit(0)
         elif opt == '-h':
             usage(argv[0])
