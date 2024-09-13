@@ -57,6 +57,9 @@ used.
  * `-n`
    Disable logging to syslog. Syslog logging is enabled by default.
 
+ * `-u <socket-path>`
+   Use the specified system log socket instead of the default '/dev/log'.
+
  * `-y <facility>`
    Set syslog facility to use.
 
@@ -190,8 +193,8 @@ The value of *user* is a dictionary in the same format as *total*'s.
 
 *log*, if present, must be a dictionary, and may contain any of the
 following keys: *console* (with a boolean value), *syslog* (boolean),
-*facility* (string), and *filter* (string). See the corresponding
-command-line options for details.
+*syslog_socket* (string), *facility* (string), and *filter*
+(string). See the corresponding command-line options for details.
 
 Configuration file example:
 

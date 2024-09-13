@@ -38,6 +38,9 @@ def usage(name):
           "                          log file is rolled over. "
           "Default is %d bytes." % paf.conf.DEFAULT_LOG_FILE_MAX_SIZE)
     print("  -n                      Disable logging to syslog.")
+    print("  -u <socket-path>        Use the specified system log socket "
+          "instead of the\n"
+          "                          default '/dev/log'.")
     print("  -y <facility>           Set syslog facility to use.")
     print("  -l <level>              Filter levels below <level>.")
     print("  -c <max-clients>        Set the maximum number of allowed "
@@ -109,7 +112,7 @@ def main(argv):
     hook = None
 
     try:
-        optlist, args = getopt.getopt(argv[1:], 'f:m:sb:x:o:nl:y:c:r:vh')
+        optlist, args = getopt.getopt(argv[1:], 'f:m:sb:x:o:nu:l:y:c:r:vh')
     except getopt.GetoptError as e:
         early_error("Error parsning command line: %s." % e)
 
@@ -152,6 +155,8 @@ def main(argv):
                 early_error("Backup file max size must be an integer.")
         elif opt == '-n':
             conf.log.set_syslog(False)
+        elif opt == '-u':
+            conf.log.set_syslog_socket(optval)
         elif opt == '-l':
             conf.log.set_filter(optval)
         elif opt == '-y':
@@ -187,7 +192,8 @@ def main(argv):
         paf.logging.configure(conf.log.console, conf.log.log_file,
                               conf.log.log_file_backup,
                               conf.log.log_file_max_size, conf.log.syslog,
-                              syslog_ident, conf.log.facility, conf.log.filter)
+                              conf.log.syslog_socket, syslog_ident,
+                              conf.log.facility, conf.log.filter)
     except Exception as e:
         early_error("Error configuring logging: %s." % e)
 

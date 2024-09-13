@@ -16,13 +16,12 @@ class LogCategory(enum.Enum):
     INTERNAL = 'internal'
 
 
-LOG_DEV = '/dev/log'
-
 logger = logging.getLogger()
 
 
 def configure(console=True, log_file=None, log_file_backup=0,
-              log_file_max_size=0, syslog=True, syslog_ident=None,
+              log_file_max_size=0, syslog=True, syslog_socket='/dev/log',
+              syslog_ident=None,
               syslog_facility=logging.handlers.SysLogHandler.LOG_DAEMON,
               filter_level=logging.INFO):
     logging.basicConfig(level=filter_level)
@@ -37,10 +36,10 @@ def configure(console=True, log_file=None, log_file_backup=0,
     if syslog:
         # In containers, the log device file may not exist. This is a reason
         # to fail early.
-        if not os.path.exists(LOG_DEV):
+        if not os.path.exists(syslog_socket):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT),
-                                    LOG_DEV)
-        syslog = logging.handlers.SysLogHandler(address=LOG_DEV,
+                                    syslog_socket)
+        syslog = logging.handlers.SysLogHandler(address=syslog_socket,
                                                 facility=syslog_facility)
         if syslog_ident is not None:
             syslog.ident = syslog_ident

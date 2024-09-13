@@ -11,6 +11,7 @@ DEFAULT_LOG_FILE = None
 DEFAULT_LOG_FILE_BACKUP = 0
 DEFAULT_LOG_FILE_MAX_SIZE = 1000000
 DEFAULT_LOG_SYSLOG = True
+DEFAULT_LOG_SYSLOG_SOCKET = '/dev/log'
 DEFAULT_LOG_FACILITY = logging.handlers.SysLogHandler.LOG_DAEMON
 DEFAULT_LOG_FILTER = logging.INFO
 DEFAULT_IDLE_MIN = 4
@@ -64,6 +65,7 @@ class LogConf:
         self.log_file_backup = DEFAULT_LOG_FILE_BACKUP
         self.log_file_max_size = DEFAULT_LOG_FILE_MAX_SIZE
         self.syslog = DEFAULT_LOG_SYSLOG
+        self.syslog_socket = DEFAULT_LOG_SYSLOG_SOCKET
         self.facility = DEFAULT_LOG_FACILITY
         self.filter = DEFAULT_LOG_FILTER
 
@@ -81,6 +83,9 @@ class LogConf:
 
     def set_syslog(self, syslog):
         self.syslog = syslog
+
+    def set_syslog_socket(self, syslog_socket):
+        self.syslog_socket = syslog_socket
 
     def set_filter(self, level_name):
         try:
@@ -114,9 +119,13 @@ class LogConf:
                 log_file_s += ", log_file_max_size: %d" % \
                     self.log_file_max_size
 
-        return "{ console: %s, log_file: %s, syslog: %s, filter: %s, " \
+        syslog_s = str(self.syslog).lower()
+        if self.syslog:
+            syslog_s += ", syslog_socket: '%s'" % self.syslog_socket
+
+        return "{ console: %s, log_file: '%s', syslog: %s, filter: %s, " \
             "facility: %s }" % (str(self.console).lower(), log_file_s,
-                                str(self.syslog).lower(), self.filter_name(),
+                                syslog_s, self.filter_name(),
                                 self.facility_name())
 
 
@@ -331,6 +340,7 @@ def log_populate(conf, log, path):
     dict_copy(log, "log_file_max_size", int, path,
               conf.log.set_log_file_max_size)
     dict_copy(log, "syslog", bool, path, conf.log.set_syslog)
+    dict_copy(log, "syslog_socket", str, path, conf.log.set_syslog_socket)
     dict_copy(log, "facility", str, path, conf.log.set_facility)
     dict_copy(log, "filter", str, path, conf.log.set_filter)
 
