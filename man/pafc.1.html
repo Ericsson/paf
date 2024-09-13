@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv='content-type' content='text/html;charset=utf8'>
+  <meta name='generator' content='Ronn-NG/v0.9.1 (http://github.com/apjanke/ronn-ng/tree/0.9.1)'>
+  <title>pafc(1) - service discovery client</title>
+  <style type='text/css' media='all'>
+  /* style: man */
+  body#manpage {margin:0}
+  .mp {max-width:100ex;padding:0 9ex 1ex 4ex}
+  .mp p,.mp pre,.mp ul,.mp ol,.mp dl {margin:0 0 20px 0}
+  .mp h2 {margin:10px 0 0 0}
+  .mp > p,.mp > pre,.mp > ul,.mp > ol,.mp > dl {margin-left:8ex}
+  .mp h3 {margin:0 0 0 4ex}
+  .mp dt {margin:0;clear:left}
+  .mp dt.flush {float:left;width:8ex}
+  .mp dd {margin:0 0 0 9ex}
+  .mp h1,.mp h2,.mp h3,.mp h4 {clear:left}
+  .mp pre {margin-bottom:20px}
+  .mp pre+h2,.mp pre+h3 {margin-top:22px}
+  .mp h2+pre,.mp h3+pre {margin-top:5px}
+  .mp img {display:block;margin:auto}
+  .mp h1.man-title {display:none}
+  .mp,.mp code,.mp pre,.mp tt,.mp kbd,.mp samp,.mp h3,.mp h4 {font-family:monospace;font-size:14px;line-height:1.42857142857143}
+  .mp h2 {font-size:16px;line-height:1.25}
+  .mp h1 {font-size:20px;line-height:2}
+  .mp {text-align:justify;background:#fff}
+  .mp,.mp code,.mp pre,.mp pre code,.mp tt,.mp kbd,.mp samp {color:#131211}
+  .mp h1,.mp h2,.mp h3,.mp h4 {color:#030201}
+  .mp u {text-decoration:underline}
+  .mp code,.mp strong,.mp b {font-weight:bold;color:#131211}
+  .mp em,.mp var {font-style:italic;color:#232221;text-decoration:none}
+  .mp a,.mp a:link,.mp a:hover,.mp a code,.mp a pre,.mp a tt,.mp a kbd,.mp a samp {color:#0000ff}
+  .mp b.man-ref {font-weight:normal;color:#434241}
+  .mp pre {padding:0 4ex}
+  .mp pre code {font-weight:normal;color:#434241}
+  .mp h2+pre,h3+pre {padding-left:0}
+  ol.man-decor,ol.man-decor li {margin:3px 0 10px 0;padding:0;float:left;width:33%;list-style-type:none;text-transform:uppercase;color:#999;letter-spacing:1px}
+  ol.man-decor {width:100%}
+  ol.man-decor li.tl {text-align:left}
+  ol.man-decor li.tc {text-align:center;letter-spacing:4px}
+  ol.man-decor li.tr {text-align:right;float:right}
+  </style>
+</head>
+<!--
+  The following styles are deprecated and will be removed at some point:
+  div#man, div#man ol.man, div#man ol.head, div#man ol.man.
+
+  The .man-page, .man-decor, .man-head, .man-foot, .man-title, and
+  .man-navigation should be used instead.
+-->
+<body id='manpage'>
+  <div class='mp' id='man'>
+
+  <div class='man-navigation' style='display:none'>
+    <a href="#NAME">NAME</a>
+    <a href="#SYNOPSIS">SYNOPSIS</a>
+    <a href="#DESCRIPTION">DESCRIPTION</a>
+    <a href="#ARGUMENTS">ARGUMENTS</a>
+    <a href="#OPTIONS">OPTIONS</a>
+    <a href="#INTERACTIVE-COMMANDS">INTERACTIVE COMMANDS</a>
+    <a href="#EXAMPLES">EXAMPLES</a>
+    <a href="#COPYRIGHT">COPYRIGHT</a>
+    <a href="#SEE-ALSO">SEE ALSO</a>
+  </div>
+
+  <ol class='man-decor man-head man head'>
+    <li class='tl'>pafc(1)</li>
+    <li class='tc'></li>
+    <li class='tr'>pafc(1)</li>
+  </ol>
+
+  
+
+<h2 id="NAME">NAME</h2>
+<p class="man-name">
+  <code>pafc</code> - <span class="man-whatis">service discovery client</span>
+</p>
+<h2 id="SYNOPSIS">SYNOPSIS</h2>
+
+<p><code>pafc</code> [-i <var>client_id</var>] [-p <var>version</var>] <var>addr</var><br>
+<code>pafc</code> [-i <var>client_id</var>] [-p <var>version</var>] [-n <var>server-index</var>&gt;] <var>domain</var><br>
+<code>pafc</code> [-a] <var>domain</var><br>
+<code>pafc</code> -l<br>
+<code>pafc</code> -h</p>
+
+<h2 id="DESCRIPTION">DESCRIPTION</h2>
+
+<p>pafc is an interactive Pathfinder service discovery client, primarily
+intended for test and debugging purposes.</p>
+
+<h2 id="ARGUMENTS">ARGUMENTS</h2>
+
+<p>pafc accept a single argument, which is either a Pathfinder service
+discovery domain name, or an address to a server. The argument will
+first be treated as a domain name, and then, if no such service
+discovery domain can be found, as a server address in XCM format.</p>
+
+<p>pafc looks up domain files in the same manner as a libpaf-based client
+would. See the libpaf documentation for details on the format and
+location of such domain files.</p>
+
+<p>If the service discovery domain name resolves to multiple addresses
+(i.e., the file contains multiple server addresses), the first server
+in the list will be used.</p>
+
+<h2 id="OPTIONS">OPTIONS</h2>
+
+<ul>
+  <li>
+<code>-i &lt;client_id&gt;</code>
+Specify the client identifier to be used, in hexadecimal format. If
+not set, pafc uses a randomly generated id.</li>
+  <li>
+<code>-p &lt;version&gt;</code>
+Specify the protocol version to be advertised to the server.</li>
+  <li>
+<code>-n &lt;server-index&gt;</code>
+Connect to server address at <var>server-index</var> in the list of servers
+for the specified domain. Default is 0.</li>
+  <li>
+<code>-a</code>
+List all server addresses of specified domain.</li>
+  <li>
+<code>-l</code>
+List all configured domains (i.e., files in the domains directory).</li>
+  <li>
+<code>-h</code>
+Display pafc usage information.</li>
+</ul>
+
+<h2 id="INTERACTIVE-COMMANDS">INTERACTIVE COMMANDS</h2>
+
+<p>If a connection to a Pathfinder server was successfully established,
+pafc will present the user with a prompt.</p>
+
+<p>pafc supports the following interactive commands:</p>
+
+<ul>
+  <li>
+<code>hello</code>
+Send a Pathfinder protocol hello request, and output the result
+of the response (i.e., the result and the protocol version used).
+An interactive hello will always the second protocol-level hello
+command, since pafc automatically performs the initial handshake
+at transport-level connection establishment.</li>
+  <li>
+<code>id</code>
+Print the session's client id. This interactive command requires
+no protocol-level interaction with the server.</li>
+  <li>
+<code>ping</code>
+Send a Pathfinder protocol ping request, and output the result,
+including the latency.</li>
+  <li>
+<code>clients</code>
+List all clients connected to the server, including the pafc
+session itself.</li>
+  <li>
+<code>services</code>
+List all services currently published on the server, including
+orphan services (i.e., services for which there is currently
+no owner), by all clients.</li>
+  <li>
+<code>subscriptions</code>
+List all subscriptions issued to the server, by all clients.</li>
+  <li>
+    <p><code>publish [&lt;service-id&gt;] &lt;generation&gt; &lt;ttl&gt; [&lt;prop-name&gt; &lt;prop-value&gt;] ...</code>
+Publish a new service, or republish an update service.</p>
+
+    <p>The service identifier is optional. If left out, pafc will generate
+a random service id for the published service.</p>
+
+    <p>In case <var>prop-value</var> is an integer in decimal format, it will
+be added as an integer. Otherwise, the string property value type
+will be used. To force the use of strings, use '|<var>integer</var>|'
+(e.g. |4711|).</p>
+  </li>
+  <li>
+<code>unpublish &lt;service-id&gt;</code>
+Unpublish a service. The server only allows services published by
+the same user as the pafc session belongs to be unpublished.</li>
+  <li>
+    <p><code>subscribe [&lt;filter-expression&gt;]</code>
+Subscribe to changes in services, with an optional filter expression.</p>
+
+    <p>The LDAP search filter-like filter language is described in the
+Pathfinder protocol specification.</p>
+
+    <p>If the filter is left out, pafc will receive notifications for
+changes to any service.</p>
+  </li>
+  <li>
+<code>unsubscribe &lt;subscription-id&gt;</code>
+Unsubscribe a service. The server only allows the removal of
+subscriptions issued by this pafc session.</li>
+  <li>
+<code>help [&lt;cmd&gt;]</code>
+Display a list of command, or in case the optional argument is
+supplied, information on a specific command.</li>
+  <li>
+<code>quit</code>
+Terminate the Pathfinder protocol connection and quit pafc. Any
+services publish as a part of this pafc session will be left as
+orphans on the server.</li>
+</ul>
+
+<p>Most of the pafc interactive commands maps closely to a Pathfinder
+protocol-level command. For more information on command requests and
+responses, please refer to the appropriate section of the Pathfinder
+protocol specification.</p>
+
+<h2 id="EXAMPLES">EXAMPLES</h2>
+
+<p>In the below session, a user connects to a server serving the service
+discovery domain "oam" and checks the latency:</p>
+
+<pre><code>$ pafc oam
+&gt; ping
+0.4 ms
+OK.
+&gt;
+</code></pre>
+
+<p>The below is pafc session where the user connects to a server on the
+host 192.168.1.59, serving a service discovery on a TLS server socket
+bound to port 4711. The user checks pafc's client id, list all
+clients, issues a subscription, and list all subscriptions. Another
+client adds a matching service, and then modifies the same service.
+The user then goes on to list all services.</p>
+
+<pre><code>$ pafc tls:192.168.1.42:4711
+&gt; id
+Client Id: 0x13b908adda6688d6
+&gt; clients
+Client Id          Remote Address    Session Uptime
+13b908adda6688d6   tls:192.168.1.59:58700 0:00:02
+4e9a2e1d7ab98fcc   tls:192.168.1.59:58692 0:00:04
+OK.
+&gt; subscribe (name=service-a)
+Subscription Id 5f2928fd0233f5c1.
+OK.
+&gt; subscriptions
+Subscription Id   Owner Id           Filter Expression
+1cda481d5018aaeb  4e9a2e1d7ab98fcc   -
+5f2928fd0233f5c1  13b908adda6688d6   (name=service-a)
+OK.
+&gt; Subscription 5f2928fd0233f5c1: Match type: appeared; Service id: 616fcc6f1bf6aabe; Generation: 0; TTL: 60; Client Id: 0x4e9a2e1d7ab98fcc; Properties: {'name': 'service-a', 'address': 'https://1.2.3.4:5555'}
+Subscription 5f2928fd0233f5c1: Match type: modified; Service id: 616fcc6f1bf6aabe; Generation: 1; TTL: 60; Client Id: 0x4e9a2e1d7ab98fcc; Properties: {'name': 'service-a', 'address': 'https://1.2.3.4:5678'}
+&gt;
+&gt; services
+  Service Id  Gen  TTL  Orphan Tmo  Owner              Properties
+616fcc6f1bf6aabe    1   60           -  4e9a2e1d7ab98fcc   {'name': 'service-a', 'address': 'https://1.2.3.4:5678'}
+OK.
+&gt;
+</code></pre>
+
+<p>In this session, a pafc user connects to a server by address, and
+publishes a service, and then modifies that service:</p>
+
+<pre><code>$ pafc tls:192.168.1.42:4711
+&gt; publish 0 60 name service-a address https://1.2.3.4:5555
+Service Id 616fcc6f1bf6aabe.
+OK.
+&gt; publish 616fcc6f1bf6aabe 1 60 name service-a address https://1.2.3.4:5678
+OK.
+&gt;
+</code></pre>
+
+<h2 id="COPYRIGHT">COPYRIGHT</h2>
+
+<p><strong>Pathfinder</strong> is Copyright (c) 2020, Ericsson AB, and released under
+the BSD 3-Clause Revised License.</p>
+
+<h2 id="SEE-ALSO">SEE ALSO</h2>
+
+<p><span class="man-ref">pafd<span class="s">(8)</span></span>.</p>
+
+  <ol class='man-decor man-foot man foot'>
+    <li class='tl'></li>
+    <li class='tc'>September 2024</li>
+    <li class='tr'>pafc(1)</li>
+  </ol>
+
+  </div>
+</body>
+</html>

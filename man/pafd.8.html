@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv='content-type' content='text/html;charset=utf8'>
+  <meta name='generator' content='Ronn-NG/v0.9.1 (http://github.com/apjanke/ronn-ng/tree/0.9.1)'>
+  <title>pafd(8) - service discovery server</title>
+  <style type='text/css' media='all'>
+  /* style: man */
+  body#manpage {margin:0}
+  .mp {max-width:100ex;padding:0 9ex 1ex 4ex}
+  .mp p,.mp pre,.mp ul,.mp ol,.mp dl {margin:0 0 20px 0}
+  .mp h2 {margin:10px 0 0 0}
+  .mp > p,.mp > pre,.mp > ul,.mp > ol,.mp > dl {margin-left:8ex}
+  .mp h3 {margin:0 0 0 4ex}
+  .mp dt {margin:0;clear:left}
+  .mp dt.flush {float:left;width:8ex}
+  .mp dd {margin:0 0 0 9ex}
+  .mp h1,.mp h2,.mp h3,.mp h4 {clear:left}
+  .mp pre {margin-bottom:20px}
+  .mp pre+h2,.mp pre+h3 {margin-top:22px}
+  .mp h2+pre,.mp h3+pre {margin-top:5px}
+  .mp img {display:block;margin:auto}
+  .mp h1.man-title {display:none}
+  .mp,.mp code,.mp pre,.mp tt,.mp kbd,.mp samp,.mp h3,.mp h4 {font-family:monospace;font-size:14px;line-height:1.42857142857143}
+  .mp h2 {font-size:16px;line-height:1.25}
+  .mp h1 {font-size:20px;line-height:2}
+  .mp {text-align:justify;background:#fff}
+  .mp,.mp code,.mp pre,.mp pre code,.mp tt,.mp kbd,.mp samp {color:#131211}
+  .mp h1,.mp h2,.mp h3,.mp h4 {color:#030201}
+  .mp u {text-decoration:underline}
+  .mp code,.mp strong,.mp b {font-weight:bold;color:#131211}
+  .mp em,.mp var {font-style:italic;color:#232221;text-decoration:none}
+  .mp a,.mp a:link,.mp a:hover,.mp a code,.mp a pre,.mp a tt,.mp a kbd,.mp a samp {color:#0000ff}
+  .mp b.man-ref {font-weight:normal;color:#434241}
+  .mp pre {padding:0 4ex}
+  .mp pre code {font-weight:normal;color:#434241}
+  .mp h2+pre,h3+pre {padding-left:0}
+  ol.man-decor,ol.man-decor li {margin:3px 0 10px 0;padding:0;float:left;width:33%;list-style-type:none;text-transform:uppercase;color:#999;letter-spacing:1px}
+  ol.man-decor {width:100%}
+  ol.man-decor li.tl {text-align:left}
+  ol.man-decor li.tc {text-align:center;letter-spacing:4px}
+  ol.man-decor li.tr {text-align:right;float:right}
+  </style>
+</head>
+<!--
+  The following styles are deprecated and will be removed at some point:
+  div#man, div#man ol.man, div#man ol.head, div#man ol.man.
+
+  The .man-page, .man-decor, .man-head, .man-foot, .man-title, and
+  .man-navigation should be used instead.
+-->
+<body id='manpage'>
+  <div class='mp' id='man'>
+
+  <div class='man-navigation' style='display:none'>
+    <a href="#NAME">NAME</a>
+    <a href="#SYNOPSIS">SYNOPSIS</a>
+    <a href="#DESCRIPTION">DESCRIPTION</a>
+    <a href="#ARGUMENTS">ARGUMENTS</a>
+    <a href="#OPTIONS">OPTIONS</a>
+    <a href="#EXAMPLES">EXAMPLES</a>
+    <a href="#RESOURCE-LIMITS">RESOURCE LIMITS</a>
+    <a href="#CONFIGURATION-FILE-FORMAT">CONFIGURATION FILE FORMAT</a>
+    <a href="#COPYRIGHT">COPYRIGHT</a>
+    <a href="#SEE-ALSO">SEE ALSO</a>
+  </div>
+
+  <ol class='man-decor man-head man head'>
+    <li class='tl'>pafd(8)</li>
+    <li class='tc'></li>
+    <li class='tr'>pafd(8)</li>
+  </ol>
+
+  
+
+<h2 id="NAME">NAME</h2>
+<p class="man-name">
+  <code>pafd</code> - <span class="man-whatis">service discovery server</span>
+</p>
+<h2 id="SYNOPSIS">SYNOPSIS</h2>
+
+<p><code>pafd</code> [<var>options</var>...] [<var>domain-addr</var>...]</p>
+
+<h2 id="DESCRIPTION">DESCRIPTION</h2>
+
+<p>pafd is a server for use in a Pathfinder light-weight service
+discovery system.</p>
+
+<p>pafd is designed to be used as a daemon (i.e., a UNIX server process),
+but does not daemonize itself (e.g., it does not call fork() and runs
+in the background).</p>
+
+<h2 id="ARGUMENTS">ARGUMENTS</h2>
+
+<p>pafd may be supplied zero or more arguments. Each such argument must a
+server socket address, in XCM format.</p>
+
+<p>For each address, the server will instantiate a service discovery
+domain, and bind to the socket. Thus, a server process may be used to
+serve more than one service discovery domain.</p>
+
+<p>pafd may be configured to serve same service discovery domain on
+different server sockets simultaneously, using the <code>-m</code> option.</p>
+
+<p>In case domains are specified both in the configuration file, and as
+arguments or options, all domains in the configuration file will be
+ignored, and only the domains specified on the command-line will be
+used.</p>
+
+<h2 id="OPTIONS">OPTIONS</h2>
+
+<ul>
+  <li>
+    <p><code>-m</code>
+Instantiate a multi-socket service discovery domain. Each server
+socket address is separated by '+' (which may not be used in the
+address).</p>
+  </li>
+  <li>
+    <p><code>-s</code>
+Enable logging to console (standard error). Console logging is
+disabled by default.</p>
+  </li>
+  <li>
+    <p><code>-o &lt;file&gt;</code>
+Enable logging directly to file.</p>
+  </li>
+  <li>
+    <p><code>-b &lt;backup-count&gt;</code>
+Enable log rotation for direct file logging, and keep <var>backup-count</var>
+number of copies.</p>
+  </li>
+  <li>
+    <p><code>-x &lt;log-file-max-size&gt;</code>
+Set the maximum log file size (in bytes) before a file is rolled
+over. Only has effect in case direct file logging with log rotation
+is enabled. Default is 1000000.</p>
+  </li>
+  <li>
+    <p><code>-n</code>
+Disable logging to syslog. Syslog logging is enabled by default.</p>
+  </li>
+  <li>
+    <p><code>-u &lt;socket-path&gt;</code>
+Use the specified system log socket instead of the default '/dev/log'.</p>
+  </li>
+  <li>
+    <p><code>-y &lt;facility&gt;</code>
+Set syslog facility to use.</p>
+  </li>
+  <li>
+    <p><code>-l &lt;level&gt;</code>
+Discard log messages with a severity level below <var>level</var>.</p>
+  </li>
+  <li>
+    <p><code>-c &lt;max-clients&gt;</code>
+Set the maximum number of allowed connected clients to
+<var>max-clients</var>. The default is no limit.</p>
+  </li>
+  <li>
+    <p><code>-f &lt;conf-file&gt;</code>
+Read configuration from <var>conf-file</var>.</p>
+  </li>
+  <li>
+    <p><code>-v</code>
+Display pafd version information.</p>
+  </li>
+  <li>
+    <p><code>-h</code>
+Display pafd usage information.</p>
+  </li>
+</ul>
+
+<p>Options override any configuration set by a configuration file.</p>
+
+<h2 id="EXAMPLES">EXAMPLES</h2>
+
+<p>The below example spawns one server process with two service discovery
+domains; one on a UNIX domain socket "foo", and one answering on TCP
+port 4711:</p>
+
+<pre><code>$ pafd ux:foo tcp:*:4711
+</code></pre>
+
+<p>This example spawns a server process, instantiates one domain, and
+enables console logging and disables syslog and log filtering:</p>
+
+<pre><code>$ pafd -n -s -l debug ux:foo
+INFO:root:Server version 1.0.3 started with configuration: domains: [ ['ux:foo'] ], log: { console: true, syslog: false, filter: debug, facility: daemon }
+</code></pre>
+
+<h2 id="RESOURCE-LIMITS">RESOURCE LIMITS</h2>
+
+<p>pafd may be configured to impose limits on various types of
+server-side resources. Such limits may be put in place to protect the
+server from CPU overload and memory or other resource exhaustion, and
+to mitigate damage caused by malicious or otherwise misbehaving
+clients.</p>
+
+<p>There are three types of resources; clients, services and
+subscriptions.</p>
+
+<p>The total resource limits specifies the maximum number of objects that
+may be instantiated, of a particular resource type, on the level of a
+service discovery domain.</p>
+
+<p>The user resource limits specifies per-user limits, within a
+particular service discovery domain. All users have the same limits
+with same upper bound values. The user is accounted against the number
+of objects used <em>in that domain</em>, for all clients associated with that
+user.</p>
+
+<p>pafd relies on transport protocol level user authentication. For TLS,
+the X.509 subject key id (SKI) is used to identify a user. For TCP,
+the client's source IP address serves the same role. Clients
+connecting using other transport protocols or IPC mechanisms (i.e.,
+UNIX domain sockets) all qualifies as the same user.</p>
+
+<p>Each client uses a number of service-side file descriptors (usually
+one or two), depending on XCM transport used. For large servers, the
+per-process file descriptor limit (see RLIMIT_NOFILE in <span class="man-ref">setrlimit<span class="s">(2)</span></span>)
+or the global limit (fs.file-max) may need to be increased.</p>
+
+<h2 id="CONFIGURATION-FILE-FORMAT">CONFIGURATION FILE FORMAT</h2>
+
+<p>The configuration file uses YAML as its base format. The root is a
+YAML dictionary (also known as a YAML mapping, or hash), with three
+keys, all optional; <em>domains</em>, <em>resources</em>, and <em>log</em>.</p>
+
+<p><em>domains</em>, if present, must be a list of service discovery domain
+dictionaries. A domain dictionary must either have a key <em>sockets</em>,
+which value is a list of all sockets (or endpoints) that should be
+bound to that domain. <em>addrs</em> may be used as an alternative name.</p>
+
+<p>A domain may also optionally be given a name, stored as a string under
+the <em>name</em> key. This domain name is only used for logging and
+documentation and is not seen in the by clients to the Pathfinder
+server.</p>
+
+<p>The range of allowed Pathfinder protocol versions for clients
+connecting to a particular domain may be administratively limited
+(beyond what the server supports) by providing a per-domain
+<em>protocol_version</em> dictionary, with either/both of the <em>max</em> and <em>min</em>
+keys.</p>
+
+<p><em>max</em> represents an upper bound for the Pathfinder protocol version
+used. Must be an integer &lt;= 3.</p>
+
+<p><em>min</em> represents a lower bound for the Pathfinder protocol version
+used. Must be an integer &gt;= 2.</p>
+
+<p>The max idle time for Pathfinder Protocol v3 clients may be controlled
+on a per-domain basis by configuring a dictionary <em>idle</em> with
+either/both of the <em>max</em> and <em>min</em> keys.</p>
+
+<p><em>max</em> represents an upper bound for the maximum idle time (in seconds)
+that will ever be employed for any client. This maximum value is also
+used as the initial value for clients connecting to that domain. The
+actual maximum idle time may be lower (e.g., if a client has published
+services with a low time-to-live [TTL]). <em>max</em> default is 30 seconds.</p>
+
+<p><em>min</em> represents a lower bound for the maximum idle time.  The default
+value is 4 seconds. <em>min</em> may not be set lower than 1 second.</p>
+
+<p>Each element of the <em>sockets</em> list is a socket. A socket is either the
+address in the form of a string (in XCM format), or a dictionary,
+where the address must be the value of the key <em>addr</em>.</p>
+
+<p>For TLS addresses, an addition key <em>tls</em> may be present in the socket
+dictionary. <em>tls</em>, if present, must be a dictionary with zero or more
+of four possible entries. <em>cert</em>, <em>key</em>, <em>tc</em> may be used to override
+the default XCM certificate, private key, or trusted CA bundle file
+locations. The key <em>crl</em> may be included in case certificate
+revocation list checking is to be employed. The value of each such key
+must be a filename in string format.</p>
+
+<p><em>resources</em>, if present, must be a dictionary, containing either or
+both of two keys <em>total</em> and <em>user</em>.</p>
+
+<p>The value of <em>total</em> must be a dictionary with any/all of the
+following keys: <em>clients</em>, <em>services</em>, and/or <em>subscriptions</em>. The
+values must all be integers, and represent the upper bound for the
+number of instances of a particular resource type, for a service
+discovery domain.</p>
+
+<p>The value of <em>user</em> is a dictionary in the same format as <em>total</em>'s.</p>
+
+<p><em>log</em>, if present, must be a dictionary, and may contain any of the
+following keys: <em>console</em> (with a boolean value), <em>syslog</em> (boolean),
+<em>syslog_socket</em> (string), <em>facility</em> (string), and <em>filter</em>
+(string). See the corresponding command-line options for details.</p>
+
+<p>Configuration file example:</p>
+
+<pre><code>domains:
+- name: domain0
+  addrs: # Domain which may be access via two server sockets
+  - tls:*:4711
+  - ux:local
+- name: domain1
+  idle:
+max: 15
+  addrs: # Second domain, only available at one socket
+  - tls:192.168.1.59:5711
+
+resources:
+  total: # Per-domain limits
+    clients: 10000
+    services: 10000
+    subscriptions: 10000
+  user: # Limits per "user" (e.g., TLS certificate)
+    clients: 1000
+    services: 1000
+    subscriptions: 1000
+
+log:
+  console: true
+  syslog: true # Usually disabled in containized environments
+  facility: daemon
+  filter: info
+</code></pre>
+
+<h2 id="COPYRIGHT">COPYRIGHT</h2>
+
+<p><strong>Pathfinder</strong> is Copyright (c) 2020, Ericsson AB, and released under
+the BSD 3-Clause Revised License.</p>
+
+<h2 id="SEE-ALSO">SEE ALSO</h2>
+
+<p><span class="man-ref">pafc<span class="s">(1)</span></span>.</p>
+
+  <ol class='man-decor man-foot man foot'>
+    <li class='tl'></li>
+    <li class='tc'>September 2024</li>
+    <li class='tr'>pafd(8)</li>
+  </ol>
+
+  </div>
+</body>
+</html>
