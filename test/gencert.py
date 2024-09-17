@@ -42,7 +42,7 @@ class Usage(enum.Enum):
     SERVER = "server"
 
 
-now = datetime.datetime.utcnow()
+now = datetime.datetime.now(datetime.timezone.utc)
 
 
 def create_cert(subject_names, ca, issuer_key, issuer_cert, usage, validity):
