@@ -142,7 +142,17 @@ domains, which translate to one or more server sockets (per server).
 To start the server and bind it to a local UNIX domain socket address,
 run:
 ```
-./app/pafd ux:test
+pafd ux:test
+```
+
+By including the paf repo directory in `PYTHONPATH`, the server and
+the other programs may be run without any installation.
+
+```
+cd <repodir>
+export PYTHONPATH=$PYTHONPATH:$PWD
+./app/pafd ux:test &
+./app/pafc ux:test
 ```
 
 ## Command-line Interface
