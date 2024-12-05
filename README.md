@@ -8,7 +8,7 @@ cloud use.
 This repository contains the server-side implementation of the
 Pathfinder Protocol
 [version 2](https://github.com/Ericsson/paf/blob/master/doc/protocol/PROTOCOLv2.md)
-and an implementation of the draft
+and
 [version 3](https://github.com/Ericsson/paf/blob/master/doc/protocol/PROTOCOLv3.md).
 
 ## Overview
