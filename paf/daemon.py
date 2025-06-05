@@ -173,9 +173,9 @@ def main(argv):
         elif opt == '-r':
             hook = optval
         elif opt == '-v':
-            print(f"Server version: {paf.server.VERSION}")
+            print("Server version: %s" % paf.server.VERSION)
             versions = " ".join(map(str, paf.proto.VERSIONS))
-            print(f"Protocol version(s): {versions}")
+            print("Protocol version(s): %s" % versions)
             sys.exit(0)
         elif opt == '-h':
             usage(argv[0])
