@@ -185,7 +185,7 @@ A Pathfinder server MUST serve exactly one domain.
 
 #### Multiple Server Domains
 
-A client connected to multiple servers serving the same domain SHOULD
+A client connected to multiple servers serving the same domain MUST
 identify itself with the same client identifier across all servers.
 
 A client publishing the same service on multiple servers serving the
