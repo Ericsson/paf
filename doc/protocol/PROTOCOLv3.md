@@ -593,7 +593,7 @@ Field Name | Value Type | Mandatory | Description
 `protocol-maximum-version` | Int>=0 | Yes | The maximum protocol version the client supports.
 
 For this document to potentially apply, the protocol version range
-MUST include protocol version 2.
+MUST include protocol version 3.
 
 The range is inclusive.
 
@@ -606,7 +606,7 @@ Field Name | Value Type | Mandatory | Description
 -----------|------------|------------|------------
 `protocol-version` | Int>=0 | Yes | The actual protocol version to be used on this connection.
 
-For this document to apply, the `protocol-version` MUST be `2`.
+For this document to apply, the `protocol-version` MUST be `3`.
 
 #### Hello Fail
 
