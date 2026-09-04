@@ -351,7 +351,7 @@ class Connection:
                     idle_limit = None
 
                 self.sd.client_connect(self.client_id, user_id,
-                                       self.idle_limit, self.idle_cb)
+                                       idle_limit, self.idle_cb)
 
                 self.debug("Handshake producedure finished for client from "
                            "\"%s\"." % self.conn_addr, LogCategory.PROTOCOL)
@@ -669,10 +669,10 @@ class Connection:
         self.debug("Performing idle check.", LogCategory.PROTOCOL)
         # In Pathfinder protocol versions prior to 3, the transport
         # connection is used as an indication of the remote peer being
-        # alive. If the connection is alive, the client is alive.
-        if self.proto_version < 3:
-            self.sd.client_active(self.client_id)
-        elif self.is_tracked() and not self.has_outstanding_track_query():
+        # alive, but we don't update the last_seen timestamp since
+        # no protocol-level activity occurred.
+        if self.proto_version >= 3 and self.is_tracked() and \
+           not self.has_outstanding_track_query():
             self.track_query(self.tas[self.track_ta_id])
 
     def time_out(self):
