@@ -208,8 +208,8 @@ A client SHOULD consider a service modified when it has received at
 least one modified type match.
 
 A client SHOULD consider a service removed only after receiving a
-removed type match from all subscriptions in which the service has
-appeared.
+`disappeared` type match from all subscriptions in which the service
+has appeared.
 
 ### Service Lifetime
 
@@ -791,7 +791,7 @@ fields:
 
 Field Name | Value Type | Mandatory | Description
 -----------|------------|------------|------------
-`match-type` | String | Yes | Will be `appeared` for new matches, `modified` for already-notified matching services being modified, or `removed` for matched services being unpublished or otherwise removed.
+`match-type` | String | Yes | Will be `appeared` for new matches, `modified` for already-notified matching services being modified, or `disappeared` for matched services being unpublished or otherwise removed.
 `service-id` | Int>=0 | Yes | Service identifier of appeared/modified/disappeared services.
 
 The following fields MUST/MAY be present in `appeared` and `modified`
