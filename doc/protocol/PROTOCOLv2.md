@@ -24,7 +24,7 @@ originating client, and server state may thus be recreated, if needed.
 
 ## Document Version
 
-This is version 2.0.0-draft.4 of the Pathfinder protocol
+This is version 2.0.0-draft.5 of the Pathfinder protocol
 specification.
 
 This is an early draft and may well include inconsistencies and other
