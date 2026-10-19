@@ -183,7 +183,7 @@ more low-level and maps closely to the Pathfinder wire protocol.
 ## Documentation
 
 The [Pathfinder application protocol
-specification](https://github.com/Ericsson/paf/blob/master/doc/PROTOCOL.md),
+specification](https://github.com/Ericsson/paf/blob/master/doc/protocol/PROTOCOLv3.md),
 in particular the data model section, includes a lot of useful
 information on how a Pathfinder service discovery system works.
 
