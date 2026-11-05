@@ -1,0 +1,29 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-venv \
+    git build-essential autoconf libtool pkg-config \
+    libc-ares-dev libssl-dev libevent-dev \
+    rsyslog \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build XCM
+RUN git clone https://github.com/Ericsson/xcm.git /tmp/xcm && \
+    cd /tmp/xcm && \
+    ./autogen.sh && \
+    ./configure --disable-lttng && \
+    make && \
+    make install && \
+    ldconfig && \
+    rm -rf /tmp/xcm
+
+WORKDIR /paf
+COPY .. .
+
+RUN pip3 install pytest pyyaml flake8 cryptography && \
+    ln -s /usr/local/bin/pytest /usr/local/bin/py.test-3
+
+ENV PYTHONPATH=/paf
+ENV PATH=/paf/app:$PATH
+
+CMD rsyslogd && make check
