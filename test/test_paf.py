@@ -1119,6 +1119,45 @@ def test_republish_same_generation_orphan_from_different_client_id(server):
     run_republish_orphan(domain_addr, new_generation=False)
 
 
+@pytest.mark.fast
+def test_reclaimed_orphan_is_rehomed_to_new_connection(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+
+    conn_pub0 = client.connect(domain_addr, client_id=client_id)
+    service_id = conn_pub0.service_id()
+    service_props = {"name": {"service-x"}}
+    conn_pub0.publish(service_id, 1, service_props, 42)
+
+    conn_sub = client.connect(domain_addr)
+    recorder = MultiResponseRecorder()
+    recorder.ta_id = conn_sub.subscribe(conn_sub.subscription_id(), recorder)
+    wait([conn_sub, conn_pub0], criteria=recorder.accepted)
+
+    wait([conn_sub, conn_pub0],
+         criteria=lambda: recorder.count_notifications() >= 1)
+
+    conn_pub0.close()
+    wait(conn_sub, criteria=lambda: recorder.count_notifications() >= 2)
+
+    conn_pub1 = client.connect(domain_addr, client_id=client_id)
+    conn_pub1.publish(service_id, 1, service_props, 42)
+    wait([conn_sub, conn_pub1],
+         criteria=lambda: recorder.count_notifications() >= 3)
+    assert recorder.get_notifications()[2][3]['client_id'] == \
+        conn_pub1.client_id
+
+    conn_pub1.close()
+    wait(conn_sub, criteria=lambda: recorder.count_notifications() >= 4)
+
+    reorphanized = recorder.get_notifications()[3]
+    assert reorphanized[1] == client.MATCH_TYPE_MODIFIED
+    assert reorphanized[2] == service_id
+    assert 'orphan_since' in reorphanized[3]
+
+    conn_sub.close()
+
+
 def run_unpublish_orphan(domain_addr, reused_client_id=None):
     conn_pub0 = client.connect(domain_addr, client_id=reused_client_id)
 

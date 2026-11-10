@@ -594,7 +594,15 @@ class Client:
                         change.orphan_since = None
                         change.client_id = self.client_id
                 elif service.is_orphan():
-                    # previous owner is back
+                    # The previous owner is back. The service may still be
+                    # filed under a now-inactive connection (the one that
+                    # was open when it was orphaned). Re-home it onto the
+                    # current active connection, otherwise it stays stranded
+                    # on a dead connection and can never be orphaned/removed
+                    # again.
+                    if self.get_service_connection(service) is not \
+                       self.active_connection:
+                        self.capture_service(service)
                     with service.modify() as change:
                         change.orphan_since = None
 
