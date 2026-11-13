@@ -1343,6 +1343,63 @@ def test_orphan_causes_rejection_of_client_with_new_user_id(tls_server):
 
 
 @pytest.mark.fast
+@pytest.mark.require_access_control
+def test_captured_orphan_releases_client_id(tls_server):
+    domain_addr = tls_server.default_domain().default_addr()
+    client_id = client.allocate_client_id()
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
+
+    conn_sub = client.connect(domain_addr)
+    subscription_recorder = MultiResponseRecorder()
+    ta_id = conn_sub.subscribe(conn_sub.subscription_id(),
+                               subscription_recorder)
+    subscription_recorder.ta_id = ta_id
+    wait(conn_sub, criteria=subscription_recorder.accepted)
+
+    conn_owner = client.connect(domain_addr, client_id=client_id)
+
+    service_id = conn_owner.service_id()
+    service_props = {
+        "name": {"service-x"}
+    }
+    service_ttl = 30
+
+    conn_owner.publish(service_id, 1, service_props, service_ttl)
+
+    wait([conn_sub, conn_owner], criteria=lambda:
+         subscription_recorder.count_notifications() >= 1)
+
+    conn_owner.close()
+
+    wait(conn_sub, criteria=lambda:
+         subscription_recorder.count_notifications() >= 2)
+
+    # another client of the same user captures the orphan
+    conn_taker = client.connect(domain_addr)
+    conn_taker.publish(service_id, 2, service_props, service_ttl)
+
+    wait([conn_sub, conn_taker], criteria=lambda:
+         subscription_recorder.count_notifications() >= 3)
+
+    captured = subscription_recorder.get_notifications()[2]
+    assert captured[3]['client_id'] == conn_taker.client_id
+
+    # the original client owns nothing, and thus its client id should
+    # be usable by a different user
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[1]
+
+    conn_new_user = client.connect(domain_addr, client_id=client_id)
+    conn_new_user.ping()
+    conn_new_user.close()
+
+    os.environ['XCM_TLS_CERT'] = CLIENT_CERTS[0]
+
+    conn_taker.close()
+    conn_sub.close()
+
+
+@pytest.mark.fast
 def test_reconnect_immediate_disconnect(server):
     domain_addr = server.random_domain().random_addr()
 

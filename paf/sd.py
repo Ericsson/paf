@@ -688,13 +688,13 @@ class Client:
         if connection.is_stale():
             owner.remove_connection(connection)
 
+            if owner.is_stale():
+                self.db.remove_client(owner)
+
     def remove_service(self, service):
         self.detach_service(service)
 
         self.resource_manager.deallocate(self.user_id, ResourceType.SERVICE)
-
-        if self.is_stale():
-            self.db.remove_client(self)
 
         self.db.remove_service(service)
 
