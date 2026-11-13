@@ -1119,6 +1119,107 @@ def test_republish_same_generation_orphan_from_different_client_id(server):
     run_republish_orphan(domain_addr, new_generation=False)
 
 
+def run_reclaimed_orphan_disconnect(domain_addr, new_generation,
+                                    reused_client_id=None):
+    conn_sub = client.connect(domain_addr)
+    subscription_recorder = MultiResponseRecorder()
+    ta_id = conn_sub.subscribe(conn_sub.subscription_id(),
+                               subscription_recorder)
+    subscription_recorder.ta_id = ta_id
+    wait(conn_sub, criteria=subscription_recorder.accepted)
+
+    conn_pub0 = client.connect(domain_addr, client_id=reused_client_id)
+
+    service_id = conn_pub0.service_id()
+    generation = 1
+    service_props = {
+        "name": {"service-x"}
+    }
+    service_ttl = 1
+
+    conn_pub0.publish(service_id, generation, service_props, service_ttl)
+
+    wait([conn_sub, conn_pub0], criteria=lambda:
+         subscription_recorder.count_notifications() >= 1)
+
+    conn_pub0.close()
+
+    wait(conn_sub, criteria=lambda:
+         subscription_recorder.count_notifications() >= 2)
+
+    orphanized = subscription_recorder.get_notifications()[1]
+    assert orphanized[1] == client.MATCH_TYPE_MODIFIED
+    assert 'orphan_since' in orphanized[3]
+
+    if new_generation:
+        generation += 1
+
+    conn_pub1 = client.connect(domain_addr, client_id=reused_client_id)
+    conn_pub1.publish(service_id, generation, service_props, service_ttl)
+
+    wait([conn_sub, conn_pub1], criteria=lambda:
+         subscription_recorder.count_notifications() >= 3)
+
+    parented = subscription_recorder.get_notifications()[2]
+    assert parented[1] == client.MATCH_TYPE_MODIFIED
+    assert 'orphan_since' not in parented[3]
+    assert parented[3]['client_id'] == conn_pub1.client_id
+
+    # the reclaimed service is now owned by the new connection, and
+    # thus must be orphanized again when that connection goes down
+    conn_pub1.close()
+
+    wait(conn_sub, criteria=lambda:
+         subscription_recorder.count_notifications() >= 4)
+
+    reorphanized = subscription_recorder.get_notifications()[3]
+    assert reorphanized[1] == client.MATCH_TYPE_MODIFIED
+    assert 'orphan_since' in reorphanized[3]
+
+    # and be removed as the orphan times out
+    wait(conn_sub, criteria=lambda:
+         subscription_recorder.count_notifications() >= 5)
+
+    disappeared = subscription_recorder.get_notifications()[4]
+    assert disappeared[1] == client.MATCH_TYPE_DISAPPEARED
+
+    conn = client.connect(domain_addr)
+    assert len(conn.services()) == 0
+    conn.close()
+
+    conn_sub.close()
+
+
+@pytest.mark.fast
+def test_reclaimed_orphan_disconnect_new_generation_same_client_id(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_reclaimed_orphan_disconnect(domain_addr, new_generation=True,
+                                    reused_client_id=client_id)
+
+
+@pytest.mark.fast
+def test_reclaimed_orphan_disconnect_same_generation_same_client_id(server):
+    domain_addr = server.random_domain().random_addr()
+    client_id = client.allocate_client_id()
+    run_reclaimed_orphan_disconnect(domain_addr, new_generation=False,
+                                    reused_client_id=client_id)
+
+
+@pytest.mark.fast
+def test_reclaimed_orphan_disconnect_new_generation_different_client_id(
+        server):
+    domain_addr = server.random_domain().random_addr()
+    run_reclaimed_orphan_disconnect(domain_addr, new_generation=True)
+
+
+@pytest.mark.fast
+def test_reclaimed_orphan_disconnect_same_generation_different_client_id(
+        server):
+    domain_addr = server.random_domain().random_addr()
+    run_reclaimed_orphan_disconnect(domain_addr, new_generation=False)
+
+
 def run_unpublish_orphan(domain_addr, reused_client_id=None):
     conn_pub0 = client.connect(domain_addr, client_id=reused_client_id)
 

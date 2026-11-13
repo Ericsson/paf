@@ -581,11 +581,10 @@ class Client:
                         "%d" % generation
                     )
 
-                prev_client_id = service.client_id()
+                self.attach_service(service)
 
-                if prev_client_id != self.client_id:
-                    self.capture_service(service)
-
+                if service.client_id() != self.client_id or \
+                   service.is_orphan():
                     with service.modify() as change:
                         # The client id is allowed to change (though you might
                         # argue against this permissive behavior), however the
@@ -593,14 +592,9 @@ class Client:
                         # need to transfer resource tokens.
                         change.orphan_since = None
                         change.client_id = self.client_id
-                elif service.is_orphan():
-                    # previous owner is back
-                    with service.modify() as change:
-                        change.orphan_since = None
 
             elif generation > service.generation():
-                if self.client_id != service.client_id():
-                    self.capture_service(service)
+                self.attach_service(service)
 
                 with service.modify() as change:
                     change.generation = generation
@@ -646,10 +640,8 @@ class Client:
 
         # A non-owning client may unpublish a service, in which case
         # it first becomes the owner.
-        new_owner = service.client_id() != self.client_id
-        if new_owner or service.is_orphan():
-            if new_owner:
-                self.capture_service(service)
+        if service.client_id() != self.client_id or service.is_orphan():
+            self.attach_service(service)
             with service.modify() as change:
                 change.orphan_since = None
                 change.client_id = self.client_id
@@ -681,21 +673,25 @@ class Client:
     def purge_orphan(self, service):
         self.remove_service(service)
 
-    def capture_service(self, service):
-        victim_client = self.db.get_client(service.client_id())
-        victim_connection = \
-            victim_client.get_service_connection(service)
-        victim_connection.remove_service(service)
+    def attach_service(self, service):
+        if self.active_connection.has_service(service.service_id):
+            return
+        self.detach_service(service)
         self.active_connection.add_service(service)
 
-    def remove_service(self, service):
-        connection = self.get_service_connection(service)
+    def detach_service(self, service):
+        owner = self.db.get_client(service.client_id())
+        connection = owner.get_service_connection(service)
+
         connection.remove_service(service)
 
-        self.resource_manager.deallocate(self.user_id, ResourceType.SERVICE)
-
         if connection.is_stale():
-            self.remove_connection(connection)
+            owner.remove_connection(connection)
+
+    def remove_service(self, service):
+        self.detach_service(service)
+
+        self.resource_manager.deallocate(self.user_id, ResourceType.SERVICE)
 
         if self.is_stale():
             self.db.remove_client(self)
